@@ -52,7 +52,10 @@ struct MainTabView: View {
                 }
                 .tag(MainTab.favorites)
 
-            ProfileTabView(viewModel: dependencies.profileViewModel)
+            ProfileTabView(
+                viewModel: dependencies.profileViewModel,
+                statsViewModel: dependencies.profileStatsViewModel
+            )
                 .tabItem {
                     Label(MainTab.profile.title, systemImage: MainTab.profile.iconName)
                 }

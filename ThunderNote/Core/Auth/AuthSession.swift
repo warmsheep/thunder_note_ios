@@ -15,7 +15,7 @@ public final class AuthSession: ObservableObject {
     @Published public private(set) var state: State = .unknown
 
     private let tokenStore: TokenStoring
-    private let onSignOut: (@Sendable () async -> Void)?
+    private var onSignOut: (@Sendable () async -> Void)?
 
     public init(
         tokenStore: TokenStoring,
@@ -23,6 +23,13 @@ public final class AuthSession: ObservableObject {
     ) {
         self.tokenStore = tokenStore
         self.onSignOut = onSignOut
+    }
+
+    /// D2-I6-12 登出全清回调注册：调用方在 `AppDependencies.bootstrap()` 前注入，
+    /// `signOut()` 时除了清 Keychain，还会触发这个回调把 UserRepository / Stats /
+    /// AvatarLocalCache / FileRepository 缓存 / DebugLog 当前会话等一并清掉。
+    public func setSignOutHandler(_ handler: (@Sendable () async -> Void)?) {
+        self.onSignOut = handler
     }
 
     /// 启动时调用一次：根据 Keychain 恢复登录态。

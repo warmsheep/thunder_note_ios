@@ -28,6 +28,10 @@ public protocol MessageRepository: Sendable {
     /// 直接基于客户端预上传媒体新建 COMPOSITE 卡片消息（D2-I3-19）。
     /// `POST /api/messages/composite`。
     func createComposite(_ request: CompositeMessageRequest) async throws -> Message
+
+    /// D2-I6-08 当前用户参与的全部消息总数（sender 或 receiver 为 self），与
+    /// 服务端 `GET /api/messages/count` 对齐；与 Android `MessageRepository.countMessages` 等价。
+    func countMessages() async throws -> Int64
 }
 
 public final class MessageRepositoryImpl: MessageRepository, @unchecked Sendable {
@@ -126,5 +130,25 @@ public final class MessageRepositoryImpl: MessageRepository, @unchecked Sendable
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
         return try await apiClient.send(endpoint)
+    }
+
+    public func countMessages() async throws -> Int64 {
+        let endpoint = Endpoint<MessageCountResponse>(
+            method: .get,
+            path: "/api/messages/count",
+            requiresAuth: true
+        )
+        return try await apiClient.send(endpoint).value
+    }
+}
+
+/// `GET /api/messages/count` 返回 `data=Long`，透明包装一层避免 ApiResponse 解码时
+/// 把整数解码到 Int64 出问题。
+public struct MessageCountResponse: Decodable, Sendable {
+    public let value: Int64
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.value = try container.decode(Int64.self)
     }
 }

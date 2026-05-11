@@ -75,6 +75,59 @@ final class ProfileViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.transientMessage)
         XCTAssertEqual(vm.profile?.avatar, "💼", "失败时本地头像不应改动")
     }
+
+    /// D2-I6-04 updateAvatarFromImageData：先调 FileRepository.upload 拿 objectName，
+    /// 再调 UserRepository.updateAvatar(objectName)；UI 状态最终 avatar == objectName。
+    @MainActor
+    func test_updateAvatarFromImageData_uploadsThenUpdatesAvatar() async {
+        let repo = StubUserRepository(cached: UserProfile(avatar: "💼", nickname: "Old"))
+        let fileRepo = StubFileRepoForAvatar(objectName: "1/avatar-xyz.jpg")
+        let vm = ProfileViewModel(repository: repo, fileRepository: fileRepo)
+        await vm.updateAvatarFromImageData(Data("jpeg".utf8))
+        XCTAssertEqual(fileRepo.uploadCount, 1)
+        XCTAssertEqual(repo.updateAvatarCalls, ["1/avatar-xyz.jpg"])
+        XCTAssertEqual(vm.profile?.avatar, "1/avatar-xyz.jpg")
+        XCTAssertNil(vm.transientMessage)
+    }
+
+    /// 上传失败时不应触发 updateAvatar，且 transient 给出错误。
+    @MainActor
+    func test_updateAvatarFromImageData_uploadFailure_doesNotCallUpdateAvatar() async {
+        let repo = StubUserRepository(cached: UserProfile(avatar: "💼", nickname: "Old"))
+        let fileRepo = StubFileRepoForAvatar(objectName: "ignored", shouldFail: true)
+        let vm = ProfileViewModel(repository: repo, fileRepository: fileRepo)
+        await vm.updateAvatarFromImageData(Data("jpeg".utf8))
+        XCTAssertEqual(repo.updateAvatarCalls.count, 0)
+        XCTAssertEqual(vm.profile?.avatar, "💼", "上传失败时不应改动 avatar")
+        XCTAssertNotNil(vm.transientMessage)
+    }
+}
+
+/// 头像专用的最小 FileRepository stub。
+private final class StubFileRepoForAvatar: FileRepository, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "tn.tests.profile.avatar.file")
+    private var _uploadCount: Int = 0
+    private let objectName: String
+    private let shouldFail: Bool
+
+    init(objectName: String, shouldFail: Bool = false) {
+        self.objectName = objectName
+        self.shouldFail = shouldFail
+    }
+
+    var uploadCount: Int { queue.sync { _uploadCount } }
+
+    func upload(fileURL: URL, mimeType: String, progress: (@Sendable (Double) -> Void)?) async throws -> FileUploadResult {
+        queue.sync { _uploadCount += 1 }
+        if shouldFail {
+            throw FileRepositoryError.transport(message: "boom")
+        }
+        return FileUploadResult(objectName: objectName)
+    }
+    func resolveDownloadURL(objectName: String?) -> URL? { nil }
+    func download(objectName: String) async throws -> URL {
+        throw FileRepositoryError.unsupportedScheme
+    }
 }
 
 private final class StubUserRepository: UserRepository, @unchecked Sendable {

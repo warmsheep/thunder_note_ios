@@ -206,6 +206,7 @@ private final class StubMediaRepo: MessageRepository, @unchecked Sendable {
     func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
         Message(id: 9998, content: request.title, mediaType: "COMPOSITE")
     }
+    func countMessages() async throws -> Int64 { 0 }
 }
 
 private final class StubFileRepo: FileRepository, @unchecked Sendable {

@@ -173,4 +173,5 @@ private final class StubCompositeMessageRepo: MessageRepository, @unchecked Send
         queue.sync { _calls.append(request) }
         return Message(id: 1, content: request.title, mediaType: "COMPOSITE")
     }
+    func countMessages() async throws -> Int64 { 0 }
 }

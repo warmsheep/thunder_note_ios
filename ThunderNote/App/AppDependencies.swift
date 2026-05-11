@@ -16,6 +16,7 @@ public final class AppDependencies: ObservableObject {
     public let flashNoteSearchViewModel: FlashNoteSearchViewModel
     public let userRepository: UserRepository
     public let profileViewModel: ProfileViewModel
+    public let profileStatsViewModel: ProfileStatsViewModel
     public let messageRepository: MessageRepository
     public let draftStore: DraftStore
     public let collectionRepository: CollectionRepository
@@ -95,7 +96,13 @@ public final class AppDependencies: ObservableObject {
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.userRepository = userRepository
-        self.profileViewModel = ProfileViewModel(repository: userRepository)
+        self.profileViewModel = ProfileViewModel(repository: userRepository, fileRepository: fileRepository)
+        self.profileStatsViewModel = ProfileStatsViewModel(
+            flashNoteRepository: flashNoteRepository,
+            favoriteRepository: favoriteRepository,
+            messageRepository: messageRepository,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
         self.collectionsViewModel = CollectionsViewModel(
             collectionRepository: collectionRepository,
             flashNoteListViewModel: flashNoteListViewModel
@@ -162,8 +169,31 @@ public final class AppDependencies: ObservableObject {
             serverConfigStore.useOfficial()
             try? shareInboxStore?.clearAll()
         }
+        // D2-I6-12 注册登出全清：捕获弱引用，避免循环。
+        session.setSignOutHandler { [weak self] in
+            await self?.performSignOutCleanup()
+        }
         session.bootstrap()
         shareInboxConsumer.scan()
+    }
+
+    /// D2-I6-12 登出全清。与 Android `FlashNoteApp.signOutAndReset()` 主链对齐：
+    /// - 清 Keychain（由 `AuthSession.signOut` 在调用本回调前已经完成）
+    /// - 清 `UserRepository` in-memory + UserDefaults（多账号隔离 key）
+    /// - 清 `ProfileStatsViewModel` 缓存
+    /// - 清本地头像 `Caches/avatar.jpg`
+    /// - 清 `ToastCenter` 当前展示
+    /// - 清 `ShareInbox` 未消费条目
+    /// - `Caches/tn.media/` 媒体缓存留给 `CacheVersionMigrator` 在下次冷启动重置（避免阻塞主线程）
+    ///
+    /// 注意：SwiftData / DebugLog / BGTask 取消在对应模块（D2-I6-13、D2-I7-06）落地后追加。
+    @MainActor
+    private func performSignOutCleanup() async {
+        userRepository.clearCache()
+        profileStatsViewModel.clearCache()
+        AvatarLocalCache.clear()
+        ToastCenter.shared.dismissCurrent()
+        try? shareInboxStore?.clearAll()
     }
 
     /// 处理 ShareInbox 里的一条 text 条目：落到对应会话（`ChatViewModel.sendText`）。

@@ -14,9 +14,14 @@ public final class ProfileViewModel: ObservableObject {
     @Published public var transientMessage: String? = nil
 
     private let repository: UserRepository
+    private let fileRepository: FileRepository?
 
-    public init(repository: UserRepository) {
+    public init(
+        repository: UserRepository,
+        fileRepository: FileRepository? = nil
+    ) {
         self.repository = repository
+        self.fileRepository = fileRepository
         // 冷启动直接显示缓存；后续 onAppear 会触发刷新。
         self.profile = repository.cachedProfile()
     }
@@ -37,6 +42,40 @@ public final class ProfileViewModel: ObservableObject {
     /// 接收资料编辑保存的回调，本地直接更新 UI（不重复发请求）。
     public func applyUpdated(_ profile: UserProfile) {
         self.profile = profile
+    }
+
+    /// D2-I6-04 头像图片裁剪后上传：写临时文件 → `FileRepository.upload` → `updateAvatar(objectName)`。
+    /// 失败 transient + 本地 avatar 不变；本地 `Caches/avatar.jpg` 也会被刷新。
+    public func updateAvatarFromImageData(_ data: Data) async {
+        guard let fileRepository else {
+            transientMessage = "未注入文件上传依赖"
+            return
+        }
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        let tmpDir = FileManager.default.temporaryDirectory
+        let tmpURL = tmpDir.appendingPathComponent("tn-avatar-\(UUID().uuidString).jpg")
+        do {
+            try data.write(to: tmpURL, options: .atomic)
+            defer { try? FileManager.default.removeItem(at: tmpURL) }
+            let upload = try await fileRepository.upload(
+                fileURL: tmpURL,
+                mimeType: "image/jpeg",
+                progress: nil
+            )
+            try await repository.updateAvatar(upload.objectName)
+            AvatarLocalCache.persist(jpegData: data)
+            if let next = repository.cachedProfile() {
+                profile = next
+            }
+        } catch let api as APIError {
+            transientMessage = api.displayMessage
+        } catch let fe as FileRepositoryError {
+            transientMessage = "头像上传失败：\(fe)"
+        } catch {
+            transientMessage = error.localizedDescription
+        }
     }
 
     /// D2-I6-03 头像 emoji / 头像 URL 更新。

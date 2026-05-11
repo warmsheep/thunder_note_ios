@@ -318,4 +318,5 @@ private final class StubInboxClearingMessageRepository: MessageRepository, @unch
     func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
         Message(id: 1, content: request.title, mediaType: "COMPOSITE")
     }
+    func countMessages() async throws -> Int64 { 0 }
 }
