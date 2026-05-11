@@ -101,6 +101,57 @@ final class SyncCoordinatorPendingTests: XCTestCase {
     }
 
     @MainActor
+    func test_enqueueText_insertsRowAndTriggersDrain() async throws {
+        let sender = AlwaysSucceedSender()
+        let engine = SyncEngine(dao: dao, sender: sender, usernameProvider: { "alice" })
+        let coord = SyncCoordinator(
+            syncRepository: StubSyncRepository(),
+            pendingMessageDao: dao,
+            syncEngine: engine,
+            usernameProvider: { "alice" }
+        )
+        let id = await coord.enqueueText(
+            flashNoteId: 7, peerUserId: nil,
+            content: "hello", clientRequestId: "req-1"
+        )
+        XCTAssertNotNil(id)
+        // drain 在 Task 中异步执行；等待发送完成
+        for _ in 0..<200 {
+            if sender.sentCount.value == 1 { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(sender.sentCount.value, 1)
+        // 成功后行被删除
+        XCTAssertEqual(try dao.listAll(username: "alice").count, 0)
+    }
+
+    @MainActor
+    func test_enqueueText_failedSend_leavesRowAsFailed() async throws {
+        let sender = AlwaysFailSender()
+        let engine = SyncEngine(dao: dao, sender: sender, usernameProvider: { "alice" }, maxAttempts: 1)
+        let coord = SyncCoordinator(
+            syncRepository: StubSyncRepository(),
+            pendingMessageDao: dao,
+            syncEngine: engine,
+            usernameProvider: { "alice" }
+        )
+        let id = await coord.enqueueText(
+            flashNoteId: nil, peerUserId: 42,
+            content: "x", clientRequestId: "req-x"
+        )
+        XCTAssertNotNil(id)
+        // 等 drain Task 跑完
+        for _ in 0..<200 {
+            if (try? dao.findByLocalId(id!))?.status == .failed { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let row = try dao.findByLocalId(id!)
+        XCTAssertEqual(row?.status, .failed)
+        XCTAssertGreaterThanOrEqual(row?.attemptCount ?? 0, 1)
+        XCTAssertEqual(row?.conversationKey, -42) // peerUserId 走负值
+    }
+
+    @MainActor
     func test_resetForSignOut_clearsPendingMessagesForUser() async throws {
         _ = try dao.insert(.alice(content: "a"))
         _ = try dao.insert(.alice(content: "b"))

@@ -138,11 +138,11 @@ public final class AppDependencies: ObservableObject {
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.syncRepository = syncRepository
-        // Step 2A：SyncEngine 接 PendingMessageDao + 占位 sender（NoopPendingMessageSender）。
-        // Step 2B 会把 sender 切到 MessageRepository / FileRepository 真实链路。
+        // Step 2B：SyncEngine 接真实 sender。文本消息直接 `messageRepository.send`；
+        // 媒体消息要求 PendingMessage.remoteUrl 已经被上传链路（ChatViewModel + FileRepository）填好。
         let syncEngine = SyncEngine(
             dao: pendingMessageDao,
-            sender: NoopPendingMessageSender(),
+            sender: MessageRepositoryPendingSender(messageRepository: messageRepository),
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.syncEngine = syncEngine

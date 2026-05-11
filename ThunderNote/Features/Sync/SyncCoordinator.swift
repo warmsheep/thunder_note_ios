@@ -88,6 +88,76 @@ public final class SyncCoordinator: ObservableObject {
         await reloadPendingCount()
     }
 
+    /// D2-I7-05 Step 2B：把一条文本消息入队 + 触发 drain。
+    /// - 用于 ChatViewModel 在网络失败 / 用户离线场景把消息推入 PendingMessage 队列；
+    ///   `clientRequestId` 由调用方生成（与 Android 一致：UUID 全局唯一，幂等去重）。
+    /// - 入队成功返回 localId；如果 username 缺失返回 nil。
+    /// - drain 会在 Task 中异步发起，不阻塞调用方。
+    @discardableResult
+    public func enqueueText(
+        flashNoteId: Int64?,
+        peerUserId: Int64?,
+        content: String,
+        clientRequestId: String
+    ) async -> Int64? {
+        guard let dao = pendingMessageDao,
+              let engine = syncEngine,
+              let username = usernameProvider(), !username.isEmpty else {
+            return nil
+        }
+        let pending = PendingMessageLocal(
+            username: username,
+            conversationKey: Self.conversationKey(flashNoteId: flashNoteId, peerUserId: peerUserId),
+            flashNoteId: flashNoteId,
+            peerUserId: peerUserId,
+            clientRequestId: clientRequestId,
+            mediaType: MessageMediaType.text.rawValue,
+            content: content,
+            status: .queued
+        )
+        do {
+            let id = try await engine.enqueue(pending)
+            await reloadPendingCount()
+            // drain 异步执行，不让 UI 等待网络。
+            Task { [weak self] in
+                _ = await engine.drain()
+                await self?.reloadPendingCount()
+            }
+            return id
+        } catch {
+            // DAO 写入失败极少见（sqlite 满 / IO 错误）；记录到 transient 让 UI 提示。
+            transientMessage = (error as? APIError)?.displayMessage ?? error.localizedDescription
+            _ = dao
+            return nil
+        }
+    }
+
+    /// 把已有 PendingMessage（例如 ChatViewModel 上层构造好的媒体消息）入队 + drain。
+    @discardableResult
+    public func enqueue(_ pending: PendingMessageLocal) async -> Int64? {
+        guard let engine = syncEngine else { return nil }
+        do {
+            let id = try await engine.enqueue(pending)
+            await reloadPendingCount()
+            Task { [weak self] in
+                _ = await engine.drain()
+                await self?.reloadPendingCount()
+            }
+            return id
+        } catch {
+            transientMessage = (error as? APIError)?.displayMessage ?? error.localizedDescription
+            return nil
+        }
+    }
+
+    /// 闪记 / 私聊会话的本地 conversationKey：与 Android `conversation_key` 计算等价：
+    /// `flashNoteId` 优先（正数），否则 `-peerUserId`（负数避免冲突）。
+    private static func conversationKey(flashNoteId: Int64?, peerUserId: Int64?) -> Int64 {
+        if let flashNoteId, flashNoteId != 0 { return flashNoteId }
+        if let peerUserId, peerUserId != 0 { return -peerUserId }
+        return 0
+    }
+
     /// 用户点击待同步列表里的「重试」。
     public func retryPending(localId: Int64) async {
         guard let syncEngine else { return }
