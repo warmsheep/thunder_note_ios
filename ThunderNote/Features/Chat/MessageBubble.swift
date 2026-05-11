@@ -8,10 +8,13 @@ struct MessageBubble: View {
     let key: ConversationKey
     let currentUserId: Int64?
     let isFavorited: Bool
+    let isHighlighted: Bool
+    let mediaUrlResolver: MediaUrlResolver?
     let onCopy: () -> Void
     let onDelete: () -> Void
     let onRetry: () -> Void
     let onToggleFavorite: () -> Void
+    let onTapMediaAttachment: () -> Void
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -35,6 +38,14 @@ struct MessageBubble: View {
                 .background(bubbleBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .foregroundStyle(bubbleForeground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            isHighlighted ? Color.yellow : Color.clear,
+                            lineWidth: 3
+                        )
+                        .animation(.easeInOut(duration: 0.4), value: isHighlighted)
+                )
                 .contextMenu {
                     Button {
                         onCopy()
@@ -74,13 +85,159 @@ struct MessageBubble: View {
         case .text:
             Text(MessageMarkdown.render(item.message.content ?? ""))
                 .textSelection(.enabled)
-        case .image, .video, .audio, .file, .composite:
-            // 媒体类消息将在 D2-I3-08 ~ I3-19 实现。
+        case .image:
+            imageThumbnail
+        case .video:
+            videoThumbnail
+        case .file:
+            fileChip
+        case .audio, .composite:
             HStack(spacing: 8) {
                 Image(systemName: mediaSymbol)
                 Text(mediaPlaceholderLabel)
             }
         }
+    }
+
+    private var imageThumbnail: some View {
+        Button(action: onTapMediaAttachment) {
+            Group {
+                if let url = thumbnailURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView().tint(.white)
+                                .frame(width: 180, height: 180)
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        case .failure:
+                            placeholderImage
+                        @unknown default:
+                            placeholderImage
+                        }
+                    }
+                } else {
+                    placeholderImage
+                }
+            }
+            .frame(width: 200, height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var videoThumbnail: some View {
+        Button(action: onTapMediaAttachment) {
+            ZStack {
+                if let url = thumbnailURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView().tint(.white)
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        default:
+                            placeholderVideo
+                        }
+                    }
+                } else {
+                    placeholderVideo
+                }
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .shadow(radius: 4)
+                if let dur = item.message.mediaDuration, dur > 0 {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Text(formatDuration(seconds: dur))
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.55))
+                                .foregroundStyle(.white)
+                                .clipShape(Capsule())
+                                .padding(6)
+                        }
+                    }
+                }
+            }
+            .frame(width: 220, height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var fileChip: some View {
+        Button(action: onTapMediaAttachment) {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 22))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.message.fileName ?? "未命名文件")
+                        .font(DesignTokens.Typography.body)
+                        .lineLimit(1)
+                    if let size = item.message.fileSize, size > 0 {
+                        Text(formatFileSize(size))
+                            .font(DesignTokens.Typography.caption)
+                            .opacity(0.85)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .frame(maxWidth: 240)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var placeholderImage: some View {
+        ZStack {
+            Color.gray.opacity(0.2)
+            Image(systemName: "photo")
+                .font(.system(size: 32))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+    }
+
+    private var placeholderVideo: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+            Image(systemName: "video")
+                .font(.system(size: 32))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+    }
+
+    private var thumbnailURL: URL? {
+        guard let resolver = mediaUrlResolver else { return nil }
+        // 图片消息：thumbnailUrl 优先，回退到 mediaUrl。
+        // 视频消息：仅 thumbnailUrl（视频原始 URL 不适合 AsyncImage）。
+        switch item.message.resolvedMediaType {
+        case .image:
+            if let thumb = item.message.thumbnailUrl, !thumb.isEmpty {
+                return resolver.resolve(thumb)
+            }
+            return resolver.resolve(item.message.mediaUrl)
+        case .video:
+            return resolver.resolve(item.message.thumbnailUrl)
+        default:
+            return nil
+        }
+    }
+
+    private func formatDuration(seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    private func formatFileSize(_ size: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
     }
 
     private var statusFooter: some View {

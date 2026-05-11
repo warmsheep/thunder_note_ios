@@ -26,7 +26,11 @@ settings:
     ENABLE_MODULE_VERIFIER: NO
     ALWAYS_SEARCH_USER_PATHS: NO
     CLANG_ENABLE_MODULES: YES
-    SWIFT_STRICT_CONCURRENCY: complete
+    # `complete` 在 iOS 16 SDK 下对 `PhotosPickerItem`、`UIScreen.main` 等
+    # 没显式 Sendable / nonisolated 的系统类型会过度报错；改用 `targeted`：
+    # 它仍然检查我们自己代码里的 Sendable / actor 隔离一致性，但对系统未标
+    # 注的 API 不强制 Sendable，避免这些 SDK 缺口阻塞编译。
+    SWIFT_STRICT_CONCURRENCY: targeted
 
 targets:
   ThunderNote:

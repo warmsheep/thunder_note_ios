@@ -1,12 +1,22 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 /// 三模式公共聊天页骨架。
 struct ChatView: View {
     @StateObject var viewModel: ChatViewModel
     let onAppearAutoUnhide: (() async -> Void)?
 
+    @EnvironmentObject private var dependencies: AppDependencies
     @EnvironmentObject private var favoriteRegistry: FavoriteIdRegistry
     @State private var scrollToken: UUID? = nil
+
+    @StateObject private var imagePickerHelper = PhotosPickerHelper()
+    @StateObject private var videoPickerHelper = PhotosPickerHelper()
+    @State private var presentImagePicker = false
+    @State private var presentVideoPicker = false
+    @State private var presentFilePicker = false
+    @State private var mediaPreviewRequest: MediaPreviewRequest?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,7 +26,10 @@ struct ChatView: View {
                 isSending: viewModel.isSending,
                 onSend: {
                     Task { await viewModel.sendText() }
-                }
+                },
+                onPickImage: { presentImagePicker = true },
+                onPickVideo: { presentVideoPicker = true },
+                onPickFile: { presentFilePicker = true }
             )
         }
         .navigationTitle(viewModel.title)
@@ -32,6 +45,49 @@ struct ChatView: View {
             }
         }
         .onDisappear { viewModel.onDisappear() }
+        .photosPicker(
+            isPresented: $presentImagePicker,
+            selection: $imagePickerHelper.selectedItem,
+            matching: .images
+        )
+        .photosPicker(
+            isPresented: $presentVideoPicker,
+            selection: $videoPickerHelper.selectedItem,
+            matching: .videos
+        )
+        .onChange(of: imagePickerHelper.selectedItem) { newValue in
+            guard newValue != nil else { return }
+            Task {
+                if let url = await imagePickerHelper.loadLocalURL(suggestedExtension: "jpg") {
+                    await viewModel.sendImage(localURL: url)
+                }
+                imagePickerHelper.reset()
+            }
+        }
+        .onChange(of: videoPickerHelper.selectedItem) { newValue in
+            guard newValue != nil else { return }
+            Task {
+                if let url = await videoPickerHelper.loadLocalURL(suggestedExtension: "mp4") {
+                    await viewModel.sendVideo(localURL: url)
+                }
+                videoPickerHelper.reset()
+            }
+        }
+        .fileImporter(
+            isPresented: $presentFilePicker,
+            allowedContentTypes: [.data, .pdf, .text, .plainText, .image, .audiovisualContent, .compositeContent],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFilePickerResult(result)
+        }
+        .sheet(item: $mediaPreviewRequest) { request in
+            MediaPreviewView(
+                viewModel: MediaDownloadViewModel(
+                    request: request,
+                    fileRepository: dependencies.fileRepository
+                )
+            )
+        }
         .alert(
             "操作失败",
             isPresented: Binding(
@@ -63,6 +119,9 @@ struct ChatView: View {
                 currentUserId: viewModel.currentUserId,
                 isLoadingMore: viewModel.isLoadingMore,
                 hasMoreOlder: viewModel.hasMoreOlder,
+                highlightedMessageId: viewModel.highlightedMessageId,
+                scrollTargetMessageId: viewModel.scrollTargetMessageId,
+                mediaUrlResolver: dependencies.mediaUrlResolver,
                 isFavorited: { item in
                     guard let remoteId = item.remoteId else { return false }
                     return favoriteRegistry.contains(remoteId)
@@ -79,11 +138,64 @@ struct ChatView: View {
                 onToggleFavorite: { item in
                     Task { await viewModel.toggleFavorite(item) }
                 },
+                onTapMediaAttachment: { item in
+                    handleMediaTap(item)
+                },
                 onReachedTop: {
                     Task { await viewModel.loadMoreOlder() }
                 },
+                onScrollTargetConsumed: {
+                    viewModel.didConsumeScrollTarget()
+                },
                 scrollToken: $scrollToken
             )
+        }
+    }
+
+    private func handleMediaTap(_ item: ChatMessageItem) {
+        guard let objectName = item.message.mediaUrl, !objectName.isEmpty else { return }
+        let kind = MediaPreviewKind.resolve(
+            mediaType: item.message.resolvedMediaType,
+            fileName: item.message.fileName
+        )
+        mediaPreviewRequest = MediaPreviewRequest(
+            kind: kind,
+            objectName: objectName,
+            title: item.message.fileName ?? "预览",
+            fileName: item.message.fileName
+        )
+    }
+
+    private func handleFilePickerResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            // fileImporter 返回的 URL 是 security scoped；需要 startAccessing。
+            let needsScope = url.startAccessingSecurityScopedResource()
+            // 立刻拷到 tmp 摆脱 scope 限制，避免上传时失败。
+            let copied = copyToTemp(url: url)
+            if needsScope { url.stopAccessingSecurityScopedResource() }
+            guard let copied else {
+                viewModel.transientMessage = "无法读取所选文件"
+                return
+            }
+            Task { await viewModel.sendFile(localURL: copied) }
+        case .failure(let error):
+            viewModel.transientMessage = error.localizedDescription
+        }
+    }
+
+    private func copyToTemp(url: URL) -> URL? {
+        let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tn-doc-\(UUID().uuidString)-\(url.lastPathComponent)")
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.copyItem(at: url, to: dest)
+            return dest
+        } catch {
+            return nil
         }
     }
 

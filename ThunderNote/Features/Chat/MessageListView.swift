@@ -1,19 +1,24 @@
 import SwiftUI
 
 /// 消息列表视图：负责按 `MessageTimeFormatter` 时间分组显示 separator，
-/// 并把单条气泡委托给 `MessageBubble`。`onAppearTopItem` 用于触发分页。
+/// 并把单条气泡委托给 `MessageBubble`。
 struct MessageListView: View {
     let items: [ChatMessageItem]
     let key: ConversationKey
     let currentUserId: Int64?
     let isLoadingMore: Bool
     let hasMoreOlder: Bool
+    let highlightedMessageId: Int64?
+    let scrollTargetMessageId: Int64?
+    let mediaUrlResolver: MediaUrlResolver?
     let isFavorited: (ChatMessageItem) -> Bool
     let onCopy: (ChatMessageItem) -> Void
     let onDelete: (ChatMessageItem) -> Void
     let onRetry: (ChatMessageItem) -> Void
     let onToggleFavorite: (ChatMessageItem) -> Void
+    let onTapMediaAttachment: (ChatMessageItem) -> Void
     let onReachedTop: () -> Void
+    let onScrollTargetConsumed: () -> Void
 
     @Binding var scrollToken: UUID?
 
@@ -36,10 +41,13 @@ struct MessageListView: View {
                             key: key,
                             currentUserId: currentUserId,
                             isFavorited: isFavorited(item),
+                            isHighlighted: item.remoteId == highlightedMessageId && highlightedMessageId != nil,
+                            mediaUrlResolver: mediaUrlResolver,
                             onCopy: { onCopy(item) },
                             onDelete: { onDelete(item) },
                             onRetry: { onRetry(item) },
-                            onToggleFavorite: { onToggleFavorite(item) }
+                            onToggleFavorite: { onToggleFavorite(item) },
+                            onTapMediaAttachment: { onTapMediaAttachment(item) }
                         )
                         .id(item.id)
                     }
@@ -51,10 +59,23 @@ struct MessageListView: View {
                 .padding(.vertical, DesignTokens.Spacing.small)
             }
             .onChange(of: items.last?.id) { _ in
-                proxy.scrollTo("__chat_bottom__", anchor: .bottom)
+                // 仅在没有 scrollTarget 时才自动滚到底，避免与 scrollToMessageId 冲突。
+                if scrollTargetMessageId == nil {
+                    proxy.scrollTo("__chat_bottom__", anchor: .bottom)
+                }
             }
             .onChange(of: scrollToken) { _ in
-                proxy.scrollTo("__chat_bottom__", anchor: .bottom)
+                if scrollTargetMessageId == nil {
+                    proxy.scrollTo("__chat_bottom__", anchor: .bottom)
+                }
+            }
+            .onChange(of: scrollTargetMessageId) { newValue in
+                guard let targetId = newValue else { return }
+                let anchorId = "remote:\(targetId)"
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(anchorId, anchor: .center)
+                }
+                onScrollTargetConsumed()
             }
         }
         .accessibilityIdentifier("chatMessageList")

@@ -4,9 +4,24 @@ struct ChatInputBar: View {
     @Binding var text: String
     let isSending: Bool
     let onSend: () -> Void
+    let onPickImage: () -> Void
+    let onPickVideo: () -> Void
+    let onPickFile: () -> Void
+
+    @State private var showAttachmentSheet = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: DesignTokens.Spacing.small) {
+            Button {
+                showAttachmentSheet = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(DesignTokens.Color.brandPrimary)
+            }
+            .disabled(isSending)
+            .accessibilityIdentifier("chatInputAttachButton")
+
             TextField(
                 "输入消息",
                 text: $text,
@@ -51,5 +66,14 @@ struct ChatInputBar: View {
                 .frame(height: 0.5),
             alignment: .top
         )
+        .confirmationDialog("发送附件", isPresented: $showAttachmentSheet, titleVisibility: .hidden) {
+            Button("图片") { onPickImage() }
+                .accessibilityIdentifier("chatInputPickImage")
+            Button("视频") { onPickVideo() }
+                .accessibilityIdentifier("chatInputPickVideo")
+            Button("文件") { onPickFile() }
+                .accessibilityIdentifier("chatInputPickFile")
+            Button("取消", role: .cancel) { }
+        }
     }
 }

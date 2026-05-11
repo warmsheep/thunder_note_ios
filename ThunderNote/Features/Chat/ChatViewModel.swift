@@ -40,6 +40,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var hasMoreOlder: Bool = true
     @Published public private(set) var isSending: Bool = false
     @Published public var transientMessage: String? = nil
+    /// `D2-I3-05` 用：滚到指定 messageId + 高亮闪烁。`nil` 表示当前不需要滚动。
+    @Published public private(set) var scrollTargetMessageId: Int64? = nil
+    /// `D2-I3-05` 用：当前需要黄底高亮的消息（短暂闪烁 1.5s 后归零）。
+    @Published public private(set) var highlightedMessageId: Int64? = nil
 
     public let configuration: Configuration
     public var key: ConversationKey { configuration.key }
@@ -51,6 +55,8 @@ public final class ChatViewModel: ObservableObject {
     private let messageRepository: MessageRepository
     private let favoriteRepository: FavoriteRepository?
     private let favoriteRegistry: FavoriteIdRegistry?
+    private let attachmentService: AttachmentSendingService?
+    private let mediaPreloader: MessageMediaPreloader?
     private let session: AuthSession
     private let draftStore: DraftStore
     private var nextPage: Int = 1
@@ -61,12 +67,16 @@ public final class ChatViewModel: ObservableObject {
         session: AuthSession,
         draftStore: DraftStore,
         favoriteRepository: FavoriteRepository? = nil,
-        favoriteRegistry: FavoriteIdRegistry? = nil
+        favoriteRegistry: FavoriteIdRegistry? = nil,
+        attachmentService: AttachmentSendingService? = nil,
+        mediaPreloader: MessageMediaPreloader? = nil
     ) {
         self.configuration = configuration
         self.messageRepository = messageRepository
         self.favoriteRepository = favoriteRepository
         self.favoriteRegistry = favoriteRegistry
+        self.attachmentService = attachmentService
+        self.mediaPreloader = mediaPreloader
         self.session = session
         self.draftStore = draftStore
         self.inputText = draftStore.get(configuration.key)
@@ -157,11 +167,58 @@ public final class ChatViewModel: ObservableObject {
             hasMoreOlder = page.hasMore
             nextPage = Int(page.safeCurrent) + 1
             loadState = .loaded
+            // 预加载最近的 image / video 缩略图
+            if let preloader = mediaPreloader {
+                let snapshot = items
+                Task.detached { await preloader.preload(items: snapshot, limit: 5) }
+            }
+            await tryScrollToInitialTarget()
         } catch let api as APIError {
             loadState = .error(api.displayMessage)
         } catch {
             loadState = .error(error.localizedDescription)
         }
+    }
+
+    /// 进入会话且首屏加载完成后，按 `configuration.targetMessageId` 尝试定位。
+    /// 若当前页没找到，会沿 `loadMoreOlder()` 翻页（最多 5 页）继续找；都找不到则 toast。
+    private func tryScrollToInitialTarget() async {
+        guard let targetId = configuration.targetMessageId else { return }
+        if items.contains(where: { $0.remoteId == targetId }) {
+            triggerScroll(to: targetId)
+            return
+        }
+        // 翻页搜索：避免无限翻历史，限制 5 页。
+        var attempts = 0
+        while attempts < 5 && hasMoreOlder {
+            await loadMoreOlder()
+            if items.contains(where: { $0.remoteId == targetId }) {
+                triggerScroll(to: targetId)
+                return
+            }
+            attempts += 1
+        }
+        transientMessage = "未找到该消息（可能已删除或过旧）"
+    }
+
+    /// 触发滚动 + 高亮闪烁（1.5s 后取消）。
+    public func triggerScroll(to messageId: Int64) {
+        scrollTargetMessageId = messageId
+        highlightedMessageId = messageId
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await MainActor.run {
+                guard let self else { return }
+                if self.highlightedMessageId == messageId {
+                    self.highlightedMessageId = nil
+                }
+            }
+        }
+    }
+
+    /// View 完成滚动后调用，清掉 scrollTarget 避免重复滚。
+    public func didConsumeScrollTarget() {
+        scrollTargetMessageId = nil
     }
 
     /// 触底加载更早的一页。当前以 `nextPage` 递增；后续 D2-I3-03 升级为
@@ -237,6 +294,124 @@ public final class ChatViewModel: ObservableObject {
         } catch let api as APIError {
             local.id = nil
             updatePendingFailure(clientRequestId: clientRequestId, reason: api.displayMessage)
+        } catch {
+            updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+        }
+    }
+
+    // MARK: - 发送媒体消息（D2-I3-08 / 09 / 13）
+
+    public func sendImage(localURL: URL) async {
+        await sendAttachment(
+            mediaType: .image,
+            localContentDescription: "[图片]"
+        ) { [attachmentService] in
+            guard let attachmentService else { throw ChatVMError.attachmentServiceMissing }
+            let outcome = try await attachmentService.uploadImage(sourceURL: localURL)
+            return AttachmentResult(
+                mediaUrl: outcome.mediaObjectName,
+                thumbnailUrl: outcome.thumbnailObjectName,
+                fileName: localURL.lastPathComponent,
+                fileSize: nil,
+                mediaDuration: nil
+            )
+        }
+    }
+
+    public func sendVideo(localURL: URL) async {
+        await sendAttachment(
+            mediaType: .video,
+            localContentDescription: "[视频]"
+        ) { [attachmentService] in
+            guard let attachmentService else { throw ChatVMError.attachmentServiceMissing }
+            let outcome = try await attachmentService.uploadVideo(sourceURL: localURL)
+            return AttachmentResult(
+                mediaUrl: outcome.mediaObjectName,
+                thumbnailUrl: outcome.thumbnailObjectName,
+                fileName: localURL.lastPathComponent,
+                fileSize: nil,
+                mediaDuration: outcome.durationSeconds
+            )
+        }
+    }
+
+    public func sendFile(localURL: URL) async {
+        await sendAttachment(
+            mediaType: .file,
+            localContentDescription: "[文件] \(localURL.lastPathComponent)"
+        ) { [attachmentService] in
+            guard let attachmentService else { throw ChatVMError.attachmentServiceMissing }
+            let outcome = try await attachmentService.uploadFile(sourceURL: localURL)
+            return AttachmentResult(
+                mediaUrl: outcome.mediaObjectName,
+                thumbnailUrl: nil,
+                fileName: outcome.fileName,
+                fileSize: outcome.fileSize,
+                mediaDuration: nil
+            )
+        }
+    }
+
+    private struct AttachmentResult {
+        let mediaUrl: String
+        let thumbnailUrl: String?
+        let fileName: String?
+        let fileSize: Int64?
+        let mediaDuration: Int?
+    }
+
+    private enum ChatVMError: Error {
+        case attachmentServiceMissing
+    }
+
+    private func sendAttachment(
+        mediaType: MessageMediaType,
+        localContentDescription: String,
+        upload: @MainActor () async throws -> AttachmentResult
+    ) async {
+        guard let userId = currentUserId else {
+            transientMessage = "登录态已失效，请重新登录"
+            return
+        }
+        guard !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+
+        let clientRequestId = UUID().uuidString
+        let now = ISO8601DateFormatter().string(from: Date())
+        var local = Message(
+            id: nil,
+            senderId: userId,
+            receiverId: receiverIdForCurrentKey(currentUserId: userId),
+            content: localContentDescription,
+            flashNoteId: configuration.key.flashNoteIdForRequest,
+            clientRequestId: clientRequestId,
+            createdAt: now,
+            mediaType: mediaType.rawValue
+        )
+        let pending = ChatMessageItem(
+            clientRequestId: clientRequestId,
+            remoteId: nil,
+            status: .pending,
+            message: local
+        )
+        items = Self.sort(items + [pending])
+
+        do {
+            let result = try await upload()
+            local.mediaUrl = result.mediaUrl
+            local.thumbnailUrl = result.thumbnailUrl
+            local.fileName = result.fileName
+            local.fileSize = result.fileSize
+            local.mediaDuration = result.mediaDuration
+            // 文本占位换成 nil（后端按 mediaType 走，content 通常空字符串即可）
+            local.content = mediaType == .file ? local.content : nil
+            let confirmed = try await messageRepository.send(local)
+            replacePending(clientRequestId: clientRequestId, with: confirmed)
+        } catch let api as APIError {
+            updatePendingFailure(clientRequestId: clientRequestId, reason: api.displayMessage)
+        } catch ChatVMError.attachmentServiceMissing {
+            updatePendingFailure(clientRequestId: clientRequestId, reason: "尚未启用附件能力")
         } catch {
             updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
         }

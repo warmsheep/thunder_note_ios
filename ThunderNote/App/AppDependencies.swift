@@ -26,6 +26,8 @@ public final class AppDependencies: ObservableObject {
     public let mediaUrlResolver: MediaUrlResolver
     public let shareInboxStore: ShareInboxStore?
     public let shareInboxConsumer: ShareInboxConsumer
+    public let attachmentSendingService: AttachmentSendingService
+    public let mediaPreloader: MessageMediaPreloader
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -91,6 +93,8 @@ public final class AppDependencies: ObservableObject {
         let shareStore = ShareInboxStore()
         self.shareInboxStore = shareStore
         self.shareInboxConsumer = ShareInboxConsumer(store: shareStore)
+        self.attachmentSendingService = AttachmentSendingService(fileRepository: fileRepository)
+        self.mediaPreloader = MessageMediaPreloader(fileRepository: fileRepository)
         self.draftStore = DraftStore()
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,
@@ -124,7 +128,9 @@ public final class AppDependencies: ObservableObject {
             session: session,
             draftStore: draftStore,
             favoriteRepository: favoriteRepository,
-            favoriteRegistry: favoriteRegistry
+            favoriteRegistry: favoriteRegistry,
+            attachmentService: attachmentSendingService,
+            mediaPreloader: mediaPreloader
         )
     }
 
