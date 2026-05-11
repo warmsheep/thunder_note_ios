@@ -7,9 +7,11 @@ struct MessageBubble: View {
     let item: ChatMessageItem
     let key: ConversationKey
     let currentUserId: Int64?
+    let isFavorited: Bool
     let onCopy: () -> Void
     let onDelete: () -> Void
     let onRetry: () -> Void
+    let onToggleFavorite: () -> Void
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -40,6 +42,19 @@ struct MessageBubble: View {
                         Label("复制", systemImage: "doc.on.doc")
                     }
                     .accessibilityIdentifier("messageActionCopy")
+
+                    if let remoteId = item.remoteId, remoteId > 0 {
+                        Button {
+                            onToggleFavorite()
+                        } label: {
+                            if isFavorited {
+                                Label("取消收藏", systemImage: "star.slash")
+                            } else {
+                                Label("收藏", systemImage: "star")
+                            }
+                        }
+                        .accessibilityIdentifier("messageActionFavorite")
+                    }
 
                     Button(role: .destructive) {
                         onDelete()

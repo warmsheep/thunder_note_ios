@@ -16,10 +16,20 @@ public final class ChatViewModel: ObservableObject {
         public let key: ConversationKey
         public let title: String
         public let pageSize: Int
-        public init(key: ConversationKey, title: String, pageSize: Int = 20) {
+        /// 从收藏 / 搜索跳转时携带的目标 messageId；只是一个语义标记，
+        /// 真正的 `scrollToMessageId + 高亮` 在 D2-I3-05 阶段落地。
+        public let targetMessageId: Int64?
+
+        public init(
+            key: ConversationKey,
+            title: String,
+            pageSize: Int = 20,
+            targetMessageId: Int64? = nil
+        ) {
             self.key = key
             self.title = title
             self.pageSize = pageSize
+            self.targetMessageId = targetMessageId
         }
     }
 
@@ -39,6 +49,8 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private let messageRepository: MessageRepository
+    private let favoriteRepository: FavoriteRepository?
+    private let favoriteRegistry: FavoriteIdRegistry?
     private let session: AuthSession
     private let draftStore: DraftStore
     private var nextPage: Int = 1
@@ -47,13 +59,62 @@ public final class ChatViewModel: ObservableObject {
         configuration: Configuration,
         messageRepository: MessageRepository,
         session: AuthSession,
-        draftStore: DraftStore
+        draftStore: DraftStore,
+        favoriteRepository: FavoriteRepository? = nil,
+        favoriteRegistry: FavoriteIdRegistry? = nil
     ) {
         self.configuration = configuration
         self.messageRepository = messageRepository
+        self.favoriteRepository = favoriteRepository
+        self.favoriteRegistry = favoriteRegistry
         self.session = session
         self.draftStore = draftStore
         self.inputText = draftStore.get(configuration.key)
+    }
+
+    /// 当前消息是否已收藏（基于 `FavoriteIdRegistry`）。
+    public func isFavorited(_ item: ChatMessageItem) -> Bool {
+        guard let registry = favoriteRegistry, let remoteId = item.remoteId else { return false }
+        return registry.contains(remoteId)
+    }
+
+    /// 切换收藏 / 取消收藏。仅对已确认（有 remoteId）消息生效。
+    public func toggleFavorite(_ item: ChatMessageItem) async {
+        guard let repository = favoriteRepository,
+              let registry = favoriteRegistry,
+              let remoteId = item.remoteId else {
+            transientMessage = "消息尚未发送，暂不能收藏"
+            return
+        }
+        let wasFavorited = registry.contains(remoteId)
+        // 乐观更新
+        if wasFavorited {
+            registry.remove(remoteId)
+        } else {
+            registry.add(remoteId)
+        }
+        do {
+            if wasFavorited {
+                try await repository.unfavorite(messageId: remoteId)
+            } else {
+                _ = try await repository.favorite(messageId: remoteId)
+            }
+        } catch let api as APIError {
+            // 回滚
+            if wasFavorited {
+                registry.add(remoteId)
+            } else {
+                registry.remove(remoteId)
+            }
+            transientMessage = api.displayMessage
+        } catch {
+            if wasFavorited {
+                registry.add(remoteId)
+            } else {
+                registry.remove(remoteId)
+            }
+            transientMessage = error.localizedDescription
+        }
     }
 
     public var currentUserId: Int64? {

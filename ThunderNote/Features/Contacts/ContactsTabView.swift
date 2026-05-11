@@ -31,7 +31,11 @@ struct ContactsTabView: View {
             .task { await viewModel.loadAll() }
             .navigationDestination(for: ChatRoute.self) { route in
                 ChatView(
-                    viewModel: dependencies.makeChatViewModel(key: route.key, title: route.title),
+                    viewModel: dependencies.makeChatViewModel(
+                        key: route.key,
+                        title: route.title,
+                        targetMessageId: route.targetMessageId
+                    ),
                     onAppearAutoUnhide: nil
                 )
             }

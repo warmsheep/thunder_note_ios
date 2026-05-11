@@ -31,7 +31,11 @@ struct CollectionsTabView: View {
                 }
                 .navigationDestination(for: ChatRoute.self) { route in
                     ChatView(
-                        viewModel: dependencies.makeChatViewModel(key: route.key, title: route.title),
+                        viewModel: dependencies.makeChatViewModel(
+                            key: route.key,
+                            title: route.title,
+                            targetMessageId: route.targetMessageId
+                        ),
                         onAppearAutoUnhide: route.flashNoteId.map { id in
                             { await flashNoteListViewModel.unhideIfNeeded(noteId: id) }
                         }

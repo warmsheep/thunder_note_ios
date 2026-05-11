@@ -5,6 +5,7 @@ struct ChatView: View {
     @StateObject var viewModel: ChatViewModel
     let onAppearAutoUnhide: (() async -> Void)?
 
+    @EnvironmentObject private var favoriteRegistry: FavoriteIdRegistry
     @State private var scrollToken: UUID? = nil
 
     var body: some View {
@@ -62,6 +63,10 @@ struct ChatView: View {
                 currentUserId: viewModel.currentUserId,
                 isLoadingMore: viewModel.isLoadingMore,
                 hasMoreOlder: viewModel.hasMoreOlder,
+                isFavorited: { item in
+                    guard let remoteId = item.remoteId else { return false }
+                    return favoriteRegistry.contains(remoteId)
+                },
                 onCopy: { item in
                     UIPasteboard.general.string = item.message.content ?? ""
                 },
@@ -70,6 +75,9 @@ struct ChatView: View {
                 },
                 onRetry: { item in
                     Task { await viewModel.retry(item) }
+                },
+                onToggleFavorite: { item in
+                    Task { await viewModel.toggleFavorite(item) }
                 },
                 onReachedTop: {
                     Task { await viewModel.loadMoreOlder() }

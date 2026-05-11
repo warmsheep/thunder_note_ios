@@ -8,9 +8,11 @@ struct MessageListView: View {
     let currentUserId: Int64?
     let isLoadingMore: Bool
     let hasMoreOlder: Bool
+    let isFavorited: (ChatMessageItem) -> Bool
     let onCopy: (ChatMessageItem) -> Void
     let onDelete: (ChatMessageItem) -> Void
     let onRetry: (ChatMessageItem) -> Void
+    let onToggleFavorite: (ChatMessageItem) -> Void
     let onReachedTop: () -> Void
 
     @Binding var scrollToken: UUID?
@@ -33,9 +35,11 @@ struct MessageListView: View {
                             item: item,
                             key: key,
                             currentUserId: currentUserId,
+                            isFavorited: isFavorited(item),
                             onCopy: { onCopy(item) },
                             onDelete: { onDelete(item) },
-                            onRetry: { onRetry(item) }
+                            onRetry: { onRetry(item) },
+                            onToggleFavorite: { onToggleFavorite(item) }
                         )
                         .id(item.id)
                     }

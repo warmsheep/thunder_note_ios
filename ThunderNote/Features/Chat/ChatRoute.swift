@@ -7,10 +7,19 @@ public struct ChatRoute: Hashable, Sendable {
     public let title: String
     /// 仅 `flash:<id>` 且非收集箱时为非空；用于在 onAppear 触发 `unhideIfNeeded`。
     public let flashNoteId: Int64?
+    /// 从收藏 / 搜索跳转时携带的目标 messageId，进入会话后用于精确定位。
+    /// 当前 MVP 仅记录该值，真正的 `scrollToMessageId + 高亮` 在 D2-I3-05 落地。
+    public let targetMessageId: Int64?
 
-    public init(key: ConversationKey, title: String, flashNoteId: Int64?) {
+    public init(
+        key: ConversationKey,
+        title: String,
+        flashNoteId: Int64?,
+        targetMessageId: Int64? = nil
+    ) {
         self.key = key
         self.title = title
         self.flashNoteId = flashNoteId
+        self.targetMessageId = targetMessageId
     }
 }

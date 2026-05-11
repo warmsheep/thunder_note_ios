@@ -19,6 +19,11 @@ public final class AppDependencies: ObservableObject {
     public let contactRepository: ContactRepository
     public let collectionsViewModel: CollectionsViewModel
     public let contactsViewModel: ContactsViewModel
+    public let favoriteRepository: FavoriteRepository
+    public let favoriteRegistry: FavoriteIdRegistry
+    public let favoritesViewModel: FavoritesViewModel
+    public let fileRepository: FileRepository
+    public let mediaUrlResolver: MediaUrlResolver
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -46,6 +51,15 @@ public final class AppDependencies: ObservableObject {
         let messageRepository = MessageRepositoryImpl(apiClient: apiClient)
         let collectionRepository = CollectionRepositoryImpl(apiClient: apiClient)
         let contactRepository = ContactRepositoryImpl(apiClient: apiClient)
+        let favoriteRepository = FavoriteRepositoryImpl(apiClient: apiClient)
+        let favoriteRegistry = FavoriteIdRegistry()
+        let mediaUrlResolver = MediaUrlResolver(serverConfigStore: serverConfigStore)
+        let fileRepository = FileRepositoryImpl(
+            session: urlSession,
+            serverConfigStore: serverConfigStore,
+            tokenAccessor: tokenAccessor,
+            mediaUrlResolver: mediaUrlResolver
+        )
         let flashNoteListViewModel = FlashNoteListViewModel(repository: flashNoteRepository)
 
         self.serverConfigStore = serverConfigStore
@@ -57,6 +71,10 @@ public final class AppDependencies: ObservableObject {
         self.messageRepository = messageRepository
         self.collectionRepository = collectionRepository
         self.contactRepository = contactRepository
+        self.favoriteRepository = favoriteRepository
+        self.favoriteRegistry = favoriteRegistry
+        self.fileRepository = fileRepository
+        self.mediaUrlResolver = mediaUrlResolver
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
         self.flashNoteListViewModel = flashNoteListViewModel
         self.collectionsViewModel = CollectionsViewModel(
@@ -64,6 +82,10 @@ public final class AppDependencies: ObservableObject {
             flashNoteListViewModel: flashNoteListViewModel
         )
         self.contactsViewModel = ContactsViewModel(repository: contactRepository)
+        self.favoritesViewModel = FavoritesViewModel(
+            repository: favoriteRepository,
+            registry: favoriteRegistry
+        )
         self.draftStore = DraftStore()
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,
@@ -82,12 +104,22 @@ public final class AppDependencies: ObservableObject {
     }
 
     /// 工厂：构造一个 `ChatViewModel`。每次进入会话调用一次，离开后由 SwiftUI 释放。
-    public func makeChatViewModel(key: ConversationKey, title: String) -> ChatViewModel {
+    public func makeChatViewModel(
+        key: ConversationKey,
+        title: String,
+        targetMessageId: Int64? = nil
+    ) -> ChatViewModel {
         ChatViewModel(
-            configuration: ChatViewModel.Configuration(key: key, title: title),
+            configuration: ChatViewModel.Configuration(
+                key: key,
+                title: title,
+                targetMessageId: targetMessageId
+            ),
             messageRepository: messageRepository,
             session: session,
-            draftStore: draftStore
+            draftStore: draftStore,
+            favoriteRepository: favoriteRepository,
+            favoriteRegistry: favoriteRegistry
         )
     }
 

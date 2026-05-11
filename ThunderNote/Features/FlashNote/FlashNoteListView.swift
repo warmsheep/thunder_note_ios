@@ -3,7 +3,7 @@ import SwiftUI
 struct FlashNoteListView: View {
     @StateObject var viewModel: FlashNoteListViewModel
     let editViewModelFactory: (FlashNoteEditViewModel.Mode) -> FlashNoteEditViewModel
-    let chatViewModelFactory: (ConversationKey, String) -> ChatViewModel
+    let chatViewModelFactory: (ConversationKey, String, Int64?) -> ChatViewModel
 
     @State private var presentedEditMode: FlashNoteEditViewModel.Mode?
     @State private var pendingDeletion: FlashNote?
@@ -20,7 +20,7 @@ struct FlashNoteListView: View {
                 .task { await viewModel.load() }
                 .navigationDestination(for: ChatRoute.self) { route in
                     ChatView(
-                        viewModel: chatViewModelFactory(route.key, route.title),
+                        viewModel: chatViewModelFactory(route.key, route.title, route.targetMessageId),
                         onAppearAutoUnhide: route.flashNoteId.map { id in
                             { await viewModel.unhideIfNeeded(noteId: id) }
                         }

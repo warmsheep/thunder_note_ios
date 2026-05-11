@@ -12,7 +12,13 @@ struct MainTabView: View {
             FlashNoteListView(
                 viewModel: dependencies.flashNoteListViewModel,
                 editViewModelFactory: dependencies.makeFlashNoteEditViewModel,
-                chatViewModelFactory: dependencies.makeChatViewModel
+                chatViewModelFactory: { key, title, targetMessageId in
+                    dependencies.makeChatViewModel(
+                        key: key,
+                        title: title,
+                        targetMessageId: targetMessageId
+                    )
+                }
             )
             .tabItem {
                 Label(MainTab.flashNote.title, systemImage: MainTab.flashNote.iconName)
@@ -36,6 +42,8 @@ struct MainTabView: View {
                 .tag(MainTab.contacts)
 
             FavoritesTabView()
+                .environmentObject(dependencies.favoritesViewModel)
+                .environmentObject(dependencies.flashNoteListViewModel)
                 .tabItem {
                     Label(MainTab.favorites.title, systemImage: MainTab.favorites.iconName)
                 }

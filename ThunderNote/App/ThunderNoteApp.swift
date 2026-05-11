@@ -11,6 +11,7 @@ struct ThunderNoteApp: App {
                 .environmentObject(dependencies.session)
                 .environmentObject(dependencies.authViewModel)
                 .environmentObject(dependencies.serverConfigObservable)
+                .environmentObject(dependencies.favoriteRegistry)
                 .task {
                     dependencies.bootstrap()
                 }
