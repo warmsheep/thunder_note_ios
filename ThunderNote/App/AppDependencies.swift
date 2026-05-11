@@ -21,6 +21,7 @@ public final class AppDependencies: ObservableObject {
     public let database: TNDatabase
     public let syncMetaDao: SyncMetaDao
     public let pendingMessageDao: PendingMessageDao
+    public let messageLocalDao: MessageLocalDao
     public let syncRepository: SyncRepository
     public let syncEngine: SyncEngine
     public let syncCoordinator: SyncCoordinator
@@ -64,6 +65,7 @@ public final class AppDependencies: ObservableObject {
         }
         let syncMetaDao: SyncMetaDao = SQLiteSyncMetaDao(database: database)
         let pendingMessageDao: PendingMessageDao = SQLitePendingMessageDao(database: database)
+        let messageLocalDao: MessageLocalDao = SQLiteMessageLocalDao(database: database)
         let urlSession = URLSession(configuration: .default)
         let tokenAccessor = DefaultTokenAccessor(
             tokenStore: tokenStore,
@@ -132,6 +134,7 @@ public final class AppDependencies: ObservableObject {
         self.database = database
         self.syncMetaDao = syncMetaDao
         self.pendingMessageDao = pendingMessageDao
+        self.messageLocalDao = messageLocalDao
         let syncRepository = SyncRepositoryImpl(
             apiClient: apiClient,
             syncMetaDao: syncMetaDao,
@@ -152,8 +155,10 @@ public final class AppDependencies: ObservableObject {
         let syncCoordinator = SyncCoordinator(
             syncRepository: syncRepository,
             pendingMessageDao: pendingMessageDao,
+            messageLocalDao: messageLocalDao,
             syncEngine: syncEngine,
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() },
+            currentUserIdProvider: { [weak tokenStore] in tokenStore?.loadUserId() },
             onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileStatsViewModel] _ in
                 if let vm = flashNoteListViewModelRef {
                     await vm.refresh()

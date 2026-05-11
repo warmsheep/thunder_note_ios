@@ -148,7 +148,8 @@ final class SyncCoordinatorPendingTests: XCTestCase {
         let row = try dao.findByLocalId(id!)
         XCTAssertEqual(row?.status, .failed)
         XCTAssertGreaterThanOrEqual(row?.attemptCount ?? 0, 1)
-        XCTAssertEqual(row?.conversationKey, -42) // peerUserId 走负值
+        // peerUserId 走 ConversationKeyResolver.forContact，与 Android 一致：-1_000_000_000 - |peerUserId|
+        XCTAssertEqual(row?.conversationKey, ConversationKeyResolver.forContact(42))
     }
 
     @MainActor

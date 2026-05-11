@@ -33,7 +33,7 @@ public final class TNDatabase: @unchecked Sendable {
     private let filePath: String
 
     /// 当前最新 schema 版本。需要新增表 / 字段时往 `Self.migrations` 末尾追加并把这个值 +1。
-    public static let latestVersion: Int = 2
+    public static let latestVersion: Int = 3
 
     /// 当前注册的 migration 列表（按 version 严格递增）。
     public static let migrations: [Migration] = [
@@ -77,6 +77,36 @@ public final class TNDatabase: @unchecked Sendable {
                 ON pending_messages(username, status);
             CREATE INDEX IF NOT EXISTS idx_pending_messages_username_created
                 ON pending_messages(username, created_at);
+        """),
+        // D2-I7-04 messages_local：服务端确认过的消息本地副本，与 Android `messages_local` 表对齐。
+        // 主键 (username, id)：服务端 message id 全局唯一，但同一个 db 文件里可能存多账号副本。
+        // conversation_key 索引覆盖 ChatViewModel 按会话拉取的主路径。
+        Migration(version: 3, sql: """
+            CREATE TABLE IF NOT EXISTS messages_local (
+                username TEXT NOT NULL,
+                id INTEGER NOT NULL,
+                conversation_key INTEGER NOT NULL,
+                sender_id INTEGER,
+                receiver_id INTEGER,
+                flash_note_id INTEGER,
+                client_request_id TEXT,
+                content TEXT,
+                read_status INTEGER,
+                role TEXT,
+                created_at TEXT,
+                media_type TEXT,
+                media_url TEXT,
+                media_duration INTEGER,
+                thumbnail_url TEXT,
+                file_name TEXT,
+                file_size INTEGER,
+                payload_json TEXT,
+                PRIMARY KEY (username, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_messages_local_username_conv_created
+                ON messages_local(username, conversation_key, created_at);
+            CREATE INDEX IF NOT EXISTS idx_messages_local_username_client_req
+                ON messages_local(username, client_request_id);
         """)
     ]
 

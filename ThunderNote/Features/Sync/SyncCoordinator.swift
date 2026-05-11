@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 
@@ -22,25 +23,39 @@ public final class SyncCoordinator: ObservableObject {
     @Published public var transientMessage: String? = nil
     @Published public private(set) var lastServerTime: String? = nil
 
+    /// D2-I7-04 每次 pull 将本轮接收到的消息写完 `messages_local` 后，用本 subject 广播
+    /// 变动的 `conversation_key` 集合。化身为 `eraseToAnyPublisher()` 给 `MessageRepository`
+    /// / `ChatViewModel` 订阅，与 Android `MessageRepository.refreshLocalConversations(keys)` 等价。
+    public var conversationsChangedPublisher: AnyPublisher<Set<Int64>, Never> {
+        conversationsChangedSubject.eraseToAnyPublisher()
+    }
+    private let conversationsChangedSubject = PassthroughSubject<Set<Int64>, Never>()
+
     private let syncRepository: SyncRepository
     private let onPullSucceeded: @Sendable (SyncPullResponse) async -> Void
     private let pendingMessageDao: PendingMessageDao?
+    private let messageLocalDao: MessageLocalDao?
     private let syncEngine: SyncEngine?
     private let usernameProvider: @Sendable () -> String?
+    private let currentUserIdProvider: @Sendable () -> Int64?
     /// 防抖：bootstrap 多次触发只跑一次。
     private var bootstrapTask: Task<Void, Never>? = nil
 
     public init(
         syncRepository: SyncRepository,
         pendingMessageDao: PendingMessageDao? = nil,
+        messageLocalDao: MessageLocalDao? = nil,
         syncEngine: SyncEngine? = nil,
         usernameProvider: @Sendable @escaping () -> String? = { nil },
+        currentUserIdProvider: @Sendable @escaping () -> Int64? = { nil },
         onPullSucceeded: @escaping @Sendable (SyncPullResponse) async -> Void = { _ in }
     ) {
         self.syncRepository = syncRepository
         self.pendingMessageDao = pendingMessageDao
+        self.messageLocalDao = messageLocalDao
         self.syncEngine = syncEngine
         self.usernameProvider = usernameProvider
+        self.currentUserIdProvider = currentUserIdProvider
         self.onPullSucceeded = onPullSucceeded
     }
 
@@ -76,6 +91,7 @@ public final class SyncCoordinator: ObservableObject {
             _ = try await syncRepository.push(SyncPushRequest())
             let response = try await syncRepository.pull()
             lastServerTime = response.serverTime ?? lastServerTime
+            persistPulledMessages(response)
             state = .idle
             await onPullSucceeded(response)
         } catch let api as APIError {
@@ -150,12 +166,10 @@ public final class SyncCoordinator: ObservableObject {
         }
     }
 
-    /// 闪记 / 私聊会话的本地 conversationKey：与 Android `conversation_key` 计算等价：
-    /// `flashNoteId` 优先（正数），否则 `-peerUserId`（负数避免冲突）。
+    /// 闪记 / 私聊会话的本地 conversationKey：直接走 `ConversationKeyResolver`
+    /// 与 Android `ConversationKeyUtil.resolve` 完全一致。
     private static func conversationKey(flashNoteId: Int64?, peerUserId: Int64?) -> Int64 {
-        if let flashNoteId, flashNoteId != 0 { return flashNoteId }
-        if let peerUserId, peerUserId != 0 { return -peerUserId }
-        return 0
+        ConversationKeyResolver.resolve(flashNoteId: flashNoteId, peerUserId: peerUserId) ?? 0
     }
 
     /// 用户点击待同步列表里的「重试」。
@@ -186,6 +200,37 @@ public final class SyncCoordinator: ObservableObject {
         transientMessage = nil
         if let username = usernameProvider(), !username.isEmpty {
             try? pendingMessageDao?.clear(username: username)
+            try? messageLocalDao?.deleteAllForUsername(username)
+        }
+    }
+
+    /// D2-I7-04 把 pull / bootstrap 收到的 messages 写入本地 `messages_local`，并广播
+    /// 变动的 `conversation_key` 集合给订阅方（`MessageRepository.refreshLocalConversations`）。
+    /// 失败安静忽略：DAO 写错只影响本地缓存，不应阻断同步链。
+    private func persistPulledMessages(_ response: SyncPullResponse) {
+        guard let dao = messageLocalDao,
+              let username = usernameProvider(), !username.isEmpty,
+              !response.messages.isEmpty else {
+            return
+        }
+        let currentUserId = currentUserIdProvider()
+        var pairs: [(Message, Int64)] = []
+        var changedKeys: Set<Int64> = []
+        for message in response.messages {
+            guard message.id != nil else { continue }
+            guard let key = ConversationKeyResolver.resolveForMessage(message, currentUserId: currentUserId) else {
+                continue
+            }
+            pairs.append((message, key))
+            changedKeys.insert(key)
+        }
+        guard !pairs.isEmpty else { return }
+        do {
+            try dao.upsertAll(pairs, username: username)
+            conversationsChangedSubject.send(changedKeys)
+        } catch {
+            // 写入失败不阻塞同步链；记录到 transient 只在 debug 时有用，正常用户感知很弱。
+            transientMessage = (error as? APIError)?.displayMessage ?? error.localizedDescription
         }
     }
 
@@ -205,6 +250,7 @@ public final class SyncCoordinator: ObservableObject {
         do {
             let response = try await syncRepository.bootstrap()
             lastServerTime = response.serverTime ?? lastServerTime
+            persistPulledMessages(response)
             state = .idle
             await onPullSucceeded(response)
         } catch let api as APIError {
