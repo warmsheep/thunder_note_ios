@@ -278,6 +278,10 @@ private final class StubFlashNoteRepository: FlashNoteRepository, @unchecked Sen
     func delete(id: Int64) async throws {
         queue.sync { _deleteCalls.append(id) }
     }
+
+    func search(query: String) async throws -> FlashNoteSearchResponse {
+        FlashNoteSearchResponse(noteNameMatched: [], messageContentMatched: [])
+    }
 }
 
 /// 仅用于覆盖 D2-I2-11 / D2-I2-12 用到的 `MessageRepository.clearInbox()`，

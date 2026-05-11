@@ -18,6 +18,11 @@ public protocol FlashNoteRepository: Sendable {
 
     /// 删除闪记。`id == -1` 是收集箱（虚拟节点），不允许删除。
     func delete(id: Int64) async throws
+
+    /// D2-I2-15 搜索闪记：标题 / 消息内容两路命中。空查询服务端会返回
+    /// 当前所有闪记（兜底），客户端的常规做法是在调用前先 trim + 空查询
+    /// 直接走本地清空逻辑，避免无意义网络往返。
+    func search(query: String) async throws -> FlashNoteSearchResponse
 }
 
 public enum FlashNoteRepositoryError: Error, Equatable {
@@ -119,5 +124,17 @@ public final class FlashNoteRepositoryImpl: FlashNoteRepository, @unchecked Send
             requiresAuth: true
         )
         _ = try await apiClient.send(endpoint)
+    }
+
+    public func search(query: String) async throws -> FlashNoteSearchResponse {
+        let body = try JSONEncoder.tnDefault.encode(FlashNoteSearchRequest(query: query))
+        let endpoint = Endpoint<FlashNoteSearchResponse>(
+            method: .post,
+            path: "/api/flash-notes/search",
+            body: body,
+            requiresAuth: true,
+            headers: ["Content-Type": "application/json; charset=utf-8"]
+        )
+        return try await apiClient.send(endpoint)
     }
 }

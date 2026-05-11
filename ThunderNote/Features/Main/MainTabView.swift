@@ -11,6 +11,7 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             FlashNoteListView(
                 viewModel: dependencies.flashNoteListViewModel,
+                searchViewModel: dependencies.flashNoteSearchViewModel,
                 editViewModelFactory: dependencies.makeFlashNoteEditViewModel,
                 chatViewModelFactory: { key, title, targetMessageId in
                     dependencies.makeChatViewModel(

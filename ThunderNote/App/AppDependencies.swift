@@ -13,6 +13,7 @@ public final class AppDependencies: ObservableObject {
     public let authViewModel: AuthViewModel
     public let flashNoteRepository: FlashNoteRepository
     public let flashNoteListViewModel: FlashNoteListViewModel
+    public let flashNoteSearchViewModel: FlashNoteSearchViewModel
     public let messageRepository: MessageRepository
     public let draftStore: DraftStore
     public let collectionRepository: CollectionRepository
@@ -86,6 +87,7 @@ public final class AppDependencies: ObservableObject {
         self.mediaUrlResolver = mediaUrlResolver
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
         self.flashNoteListViewModel = flashNoteListViewModel
+        self.flashNoteSearchViewModel = FlashNoteSearchViewModel(repository: flashNoteRepository)
         self.collectionsViewModel = CollectionsViewModel(
             collectionRepository: collectionRepository,
             flashNoteListViewModel: flashNoteListViewModel

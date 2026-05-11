@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct FlashNoteListView: View {
     @StateObject var viewModel: FlashNoteListViewModel
+    @StateObject var searchViewModel: FlashNoteSearchViewModel
     let editViewModelFactory: (FlashNoteEditViewModel.Mode) -> FlashNoteEditViewModel
     let chatViewModelFactory: (ConversationKey, String, Int64?) -> ChatViewModel
 
@@ -30,6 +31,10 @@ struct FlashNoteListView: View {
     @StateObject private var quickCaptureImagePickerHelper = PhotosPickerHelper()
     @StateObject private var quickCaptureVideoPickerHelper = PhotosPickerHelper()
 
+    // MARK: - D2-I2-15 搜索状态
+    @State private var isSearchActive: Bool = false
+    @FocusState private var searchFieldFocused: Bool
+
     var body: some View {
         NavigationStack(path: $path) {
             ZStack(alignment: .bottomTrailing) {
@@ -40,7 +45,19 @@ struct FlashNoteListView: View {
                             shareInboxEntry = shareInboxConsumer.pendingEntries.first
                         }
                     )
-                    content
+                    if isSearchActive {
+                        searchBar
+                    }
+                    if isSearchActive {
+                        FlashNoteSearchPaneView(
+                            viewModel: searchViewModel,
+                            onPickResult: { note, messageId in
+                                handleSearchPick(note: note, messageId: messageId)
+                            }
+                        )
+                    } else {
+                        content
+                    }
                 }
                 // D2-I2-13 右下角快速捕获 FAB；点击弹出 6 入口菜单。
                 QuickCaptureFAB(onTap: { presentQuickCaptureMenu = true })
@@ -259,10 +276,9 @@ struct FlashNoteListView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button {
-                // 搜索入口占位：D2-I2-15 接入实际搜索页面
-                viewModel.transientMessage = "搜索能力将在后续阶段接入"
+                toggleSearch()
             } label: {
-                Image(systemName: "magnifyingglass")
+                Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
             }
             .accessibilityIdentifier("flashNoteListSearchButton")
 
@@ -273,6 +289,70 @@ struct FlashNoteListView: View {
             }
             .accessibilityIdentifier("flashNoteListAddButton")
         }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: DesignTokens.Spacing.small) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(DesignTokens.Color.textSecondary)
+            TextField("搜索闪记标题或消息", text: $searchViewModel.query)
+                .textFieldStyle(.plain)
+                .focused($searchFieldFocused)
+                .submitLabel(.search)
+                .onChange(of: searchViewModel.query) { newValue in
+                    searchViewModel.onQueryChanged(newValue)
+                }
+                .onSubmit {
+                    Task { await searchViewModel.submitNow() }
+                }
+                .accessibilityIdentifier("flashNoteSearchInput")
+            if !searchViewModel.query.isEmpty {
+                Button {
+                    // 设空 query 由 onChange 触发 onQueryChanged("") 走清空分支。
+                    searchViewModel.query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(DesignTokens.Color.textSecondary)
+                }
+                .accessibilityIdentifier("flashNoteSearchClearButton")
+            }
+        }
+        .padding(.horizontal, DesignTokens.Spacing.medium)
+        .padding(.vertical, 10)
+        .background(DesignTokens.Color.surface)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.medium))
+        .padding(.horizontal, DesignTokens.Spacing.medium)
+        .padding(.vertical, DesignTokens.Spacing.small)
+    }
+
+    private func toggleSearch() {
+        if isSearchActive {
+            searchViewModel.onDeactivate()
+            searchFieldFocused = false
+            isSearchActive = false
+        } else {
+            isSearchActive = true
+            searchViewModel.onActivate()
+            // 异步聚焦让搜索栏先 layout 出来，再触发 keyboard。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                searchFieldFocused = true
+            }
+        }
+    }
+
+    /// D2-I2-16 搜索结果点击 → 路由进入会话；非空 messageId 透传到
+    /// `ChatRoute.targetMessageId`，由 `ChatViewModel`（D2-I3-05）做滚动 + 高亮。
+    private func handleSearchPick(note: FlashNote, messageId: Int64?) {
+        // 进入会话前先关闭搜索面板，避免 back 时仍处于搜索态。
+        searchViewModel.onDeactivate()
+        searchFieldFocused = false
+        isSearchActive = false
+        path.append(ChatRoute(
+            key: .flashNote(note.id),
+            title: note.displayTitle,
+            flashNoteId: note.isInbox ? nil : note.id,
+            targetMessageId: messageId
+        ))
     }
 
     private var loadingView: some View {

@@ -89,4 +89,7 @@ private final class StubEditRepo: FlashNoteRepository, @unchecked Sendable {
     func setPinned(id: Int64, value: Bool) async throws {}
     func setHidden(id: Int64, value: Bool) async throws {}
     func delete(id: Int64) async throws {}
+    func search(query: String) async throws -> FlashNoteSearchResponse {
+        FlashNoteSearchResponse(noteNameMatched: [], messageContentMatched: [])
+    }
 }
