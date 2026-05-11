@@ -14,6 +14,8 @@ public final class AppDependencies: ObservableObject {
     public let flashNoteRepository: FlashNoteRepository
     public let flashNoteListViewModel: FlashNoteListViewModel
     public let flashNoteSearchViewModel: FlashNoteSearchViewModel
+    public let userRepository: UserRepository
+    public let profileViewModel: ProfileViewModel
     public let messageRepository: MessageRepository
     public let draftStore: DraftStore
     public let collectionRepository: CollectionRepository
@@ -88,6 +90,12 @@ public final class AppDependencies: ObservableObject {
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
         self.flashNoteListViewModel = flashNoteListViewModel
         self.flashNoteSearchViewModel = FlashNoteSearchViewModel(repository: flashNoteRepository)
+        let userRepository = UserRepositoryImpl(
+            apiClient: apiClient,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
+        self.userRepository = userRepository
+        self.profileViewModel = ProfileViewModel(repository: userRepository)
         self.collectionsViewModel = CollectionsViewModel(
             collectionRepository: collectionRepository,
             flashNoteListViewModel: flashNoteListViewModel
