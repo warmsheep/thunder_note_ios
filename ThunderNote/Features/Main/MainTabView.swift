@@ -11,7 +11,8 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             FlashNoteListView(
                 viewModel: dependencies.flashNoteListViewModel,
-                editViewModelFactory: dependencies.makeFlashNoteEditViewModel
+                editViewModelFactory: dependencies.makeFlashNoteEditViewModel,
+                chatViewModelFactory: dependencies.makeChatViewModel
             )
             .tabItem {
                 Label(MainTab.flashNote.title, systemImage: MainTab.flashNote.iconName)

@@ -105,6 +105,12 @@ public final class FlashNoteListViewModel: ObservableObject {
         }
     }
 
+    /// 进入会话时若该闪记当前 hidden=true，自动 unhide（与 Android 行为对齐）。
+    public func unhideIfNeeded(noteId: Int64) async {
+        guard let note = note(byId: noteId), note.isHidden, !note.isInbox else { return }
+        await toggleHidden(note)
+    }
+
     public func upsertCreated(_ note: FlashNote) {
         if let idx = notes.firstIndex(where: { $0.id == note.id }) {
             notes[idx] = note

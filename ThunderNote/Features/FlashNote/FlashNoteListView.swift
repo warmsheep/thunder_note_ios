@@ -3,19 +3,29 @@ import SwiftUI
 struct FlashNoteListView: View {
     @StateObject var viewModel: FlashNoteListViewModel
     let editViewModelFactory: (FlashNoteEditViewModel.Mode) -> FlashNoteEditViewModel
+    let chatViewModelFactory: (ConversationKey, String) -> ChatViewModel
 
     @State private var presentedEditMode: FlashNoteEditViewModel.Mode?
     @State private var pendingDeletion: FlashNote?
     @State private var showError: Bool = false
+    @State private var path: [ChatRoute] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle("闪记")
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar { toolbar }
                 .refreshable { await viewModel.refresh() }
                 .task { await viewModel.load() }
+                .navigationDestination(for: ChatRoute.self) { route in
+                    ChatView(
+                        viewModel: chatViewModelFactory(route.key, route.title),
+                        onAppearAutoUnhide: route.flashNoteId.map { id in
+                            { await viewModel.unhideIfNeeded(noteId: id) }
+                        }
+                    )
+                }
                 .alert(
                     "确认删除该闪记？",
                     isPresented: Binding(
@@ -75,10 +85,18 @@ struct FlashNoteListView: View {
     private var list: some View {
         List {
             ForEach(viewModel.visibleNotes) { note in
-                FlashNoteRowView(note: note)
-                    .contentShape(Rectangle())
-                    .listRowSeparator(.visible)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    path.append(ChatRoute(
+                        key: .flashNote(note.id),
+                        title: note.displayTitle,
+                        flashNoteId: note.isInbox ? nil : note.id
+                    ))
+                } label: {
+                    FlashNoteRowView(note: note)
+                }
+                .buttonStyle(.plain)
+                .listRowSeparator(.visible)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if !note.isInbox {
                             Button(role: .destructive) {
                                 pendingDeletion = note

@@ -13,6 +13,8 @@ public final class AppDependencies: ObservableObject {
     public let authViewModel: AuthViewModel
     public let flashNoteRepository: FlashNoteRepository
     public let flashNoteListViewModel: FlashNoteListViewModel
+    public let messageRepository: MessageRepository
+    public let draftStore: DraftStore
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -37,6 +39,7 @@ public final class AppDependencies: ObservableObject {
         )
         let authRepository = AuthRepositoryImpl(apiClient: apiClient)
         let flashNoteRepository = FlashNoteRepositoryImpl(apiClient: apiClient)
+        let messageRepository = MessageRepositoryImpl(apiClient: apiClient)
 
         self.serverConfigStore = serverConfigStore
         self.tokenStore = tokenStore
@@ -44,8 +47,10 @@ public final class AppDependencies: ObservableObject {
         self.apiClient = apiClient
         self.authRepository = authRepository
         self.flashNoteRepository = flashNoteRepository
+        self.messageRepository = messageRepository
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
         self.flashNoteListViewModel = FlashNoteListViewModel(repository: flashNoteRepository)
+        self.draftStore = DraftStore()
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,
             onSwitched: { [weak tokenStore, weak session] in
@@ -60,6 +65,16 @@ public final class AppDependencies: ObservableObject {
     /// 工厂：根据 list 弹出的「新建 / 编辑」请求构造对应 ViewModel。
     public func makeFlashNoteEditViewModel(_ mode: FlashNoteEditViewModel.Mode) -> FlashNoteEditViewModel {
         FlashNoteEditViewModel(mode: mode, repository: flashNoteRepository)
+    }
+
+    /// 工厂：构造一个 `ChatViewModel`。每次进入会话调用一次，离开后由 SwiftUI 释放。
+    public func makeChatViewModel(key: ConversationKey, title: String) -> ChatViewModel {
+        ChatViewModel(
+            configuration: ChatViewModel.Configuration(key: key, title: title),
+            messageRepository: messageRepository,
+            session: session,
+            draftStore: draftStore
+        )
     }
 
     public func bootstrap() {
