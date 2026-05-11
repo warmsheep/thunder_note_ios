@@ -72,6 +72,8 @@ public final class ChatViewModel: ObservableObject {
     private var nextPage: Int = 1
     /// `D2-I3-04` 进入会话时根据 anchorStore 读出的恢复目标，加载首页后用于定位。
     private var pendingRestoreAnchorId: Int64? = nil
+    /// D2-I7-04 Step 2D-2 订阅 MessageRepository 的会话变更事件。
+    private var conversationChangedCancellable: AnyCancellable?
 
     public init(
         configuration: Configuration,
@@ -161,6 +163,16 @@ public final class ChatViewModel: ObservableObject {
         if inputText.isEmpty && !saved.isEmpty {
             inputText = saved
         }
+        // D2-I7-04 Step 2D-2 订阅本地变更：每次 SyncCoordinator pull 落库后会推一轮，
+        // 这里重读 `listLocalMessages` 并 merge 进当前 items（保留 pending / failed）。
+        if conversationChangedCancellable == nil {
+            conversationChangedCancellable = messageRepository
+                .conversationChanged(for: configuration.key)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.mergeLocalMessages()
+                }
+        }
     }
 
     public func onDisappear() {
@@ -177,6 +189,16 @@ public final class ChatViewModel: ObservableObject {
     public func loadInitial() async {
         loadState = .loading
         nextPage = 1
+        // D2-I7-04 Step 2D-2 离线优先：先用 messages_local 把 items 立即显示出来，
+        // 避免网络慢时空白；服务器返回后再覆盖（与 Android `getMessages` LiveData 体感等价）。
+        let localSnapshot = messageRepository.listLocalMessages(
+            key: configuration.key,
+            limit: configuration.pageSize
+        )
+        if !localSnapshot.isEmpty {
+            items = Self.sort(localSnapshot.map { Self.makeItem(from: $0) })
+            loadState = .loaded
+        }
         do {
             let page = try await messageRepository.listMessages(
                 key: configuration.key,
@@ -185,7 +207,7 @@ public final class ChatViewModel: ObservableObject {
             )
             let messages = page.safeRecords.map { Self.makeItem(from: $0) }
             // 后端默认 desc 返回（最新在前），UI 按 ascending 展示
-            items = Self.sort(messages)
+            items = Self.mergePreservingPending(network: messages, current: items)
             hasMoreOlder = page.hasMore
             nextPage = Int(page.safeCurrent) + 1
             loadState = .loaded
@@ -198,10 +220,53 @@ public final class ChatViewModel: ObservableObject {
             // D2-I3-04：若没有 targetMessageId 且 anchor 命中页面，触发滚动恢复。
             await tryRestoreScrollAnchor()
         } catch let api as APIError {
-            loadState = .error(api.displayMessage)
+            // 拿到本地快照时网络失败不掉进 error 态，给个 toast 提示即可。
+            if items.isEmpty {
+                loadState = .error(api.displayMessage)
+            } else {
+                transientMessage = api.displayMessage
+                loadState = .loaded
+            }
         } catch {
-            loadState = .error(error.localizedDescription)
+            if items.isEmpty {
+                loadState = .error(error.localizedDescription)
+            } else {
+                transientMessage = error.localizedDescription
+                loadState = .loaded
+            }
         }
+    }
+
+    /// 收到 `conversationChanged` 事件后用本地表覆盖确认消息部分，保留 pending / failed。
+    private func mergeLocalMessages() {
+        let local = messageRepository.listLocalMessages(
+            key: configuration.key,
+            limit: max(configuration.pageSize, items.count)
+        )
+        guard !local.isEmpty else { return }
+        let networkItems = local.map { Self.makeItem(from: $0) }
+        items = Self.mergePreservingPending(network: networkItems, current: items)
+    }
+
+    /// 把网络 / 本地表的确认消息合并到当前 items，**保留** clientRequestId 未被服务端确认的
+    /// pending / failed 项（避免后台 pull 把刚发出去还没拿到 id 的乐观消息冲掉）。
+    static func mergePreservingPending(
+        network: [ChatMessageItem],
+        current: [ChatMessageItem]
+    ) -> [ChatMessageItem] {
+        let networkClientIds = Set(network.compactMap { $0.clientRequestId })
+        let pendingTail = current.filter { item in
+            switch item.status {
+            case .sent: return false
+            case .pending, .failed:
+                // 已被服务端确认（clientRequestId 出现在网络结果里）就不再保留 pending 副本
+                if let cid = item.clientRequestId, networkClientIds.contains(cid) {
+                    return false
+                }
+                return true
+            }
+        }
+        return sort(network + pendingTail)
     }
 
     /// 进入会话且首屏加载完成后，尝试按上次离开时的 anchor 把视图滚回去。
@@ -491,6 +556,7 @@ public final class ChatViewModel: ObservableObject {
             do {
                 try await messageRepository.delete(id: remoteId)
                 items.removeAll { $0.id == item.id }
+                messageRepository.removeLocalMessages(ids: [remoteId])
             } catch let api as APIError {
                 transientMessage = api.displayMessage
             } catch {
@@ -550,6 +616,7 @@ public final class ChatViewModel: ObservableObject {
                 guard let remoteId = item.remoteId else { return false }
                 return selectedRemoteIds.contains(remoteId)
             }
+            messageRepository.removeLocalMessages(ids: ids)
             exitMultiSelect()
         } catch let api as APIError {
             transientMessage = api.displayMessage
@@ -600,6 +667,7 @@ public final class ChatViewModel: ObservableObject {
             var newItems = items
             newItems.append(cardItem)
             items = Self.sort(newItems)
+            messageRepository.upsertLocalMessage(confirmed)
             presentMergeSheet = false
             exitMultiSelect()
         } catch let api as APIError {
@@ -624,6 +692,7 @@ public final class ChatViewModel: ObservableObject {
             var newItems = items
             newItems.append(cardItem)
             items = Self.sort(newItems)
+            messageRepository.upsertLocalMessage(confirmed)
             return true
         } catch let api as APIError {
             transientMessage = api.displayMessage
@@ -656,6 +725,8 @@ public final class ChatViewModel: ObservableObject {
             items.append(item)
         }
         items = Self.sort(items)
+        // D2-I7-04 Step 2D-2 把已确认的消息同步到本地表，让其他端 pull 时不需要再覆盖一次。
+        messageRepository.upsertLocalMessage(confirmed)
     }
 
     private func updatePendingFailure(clientRequestId: String, reason: String) {

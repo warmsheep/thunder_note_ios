@@ -85,7 +85,12 @@ public final class AppDependencies: ObservableObject {
         )
         let authRepository = AuthRepositoryImpl(apiClient: apiClient)
         let flashNoteRepository = FlashNoteRepositoryImpl(apiClient: apiClient)
-        let messageRepository = MessageRepositoryImpl(apiClient: apiClient)
+        let messageRepository = MessageRepositoryImpl(
+            apiClient: apiClient,
+            messageLocalDao: messageLocalDao,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() },
+            currentUserIdProvider: { [weak tokenStore] in tokenStore?.loadUserId() }
+        )
         let collectionRepository = CollectionRepositoryImpl(apiClient: apiClient)
         let contactRepository = ContactRepositoryImpl(apiClient: apiClient)
         let favoriteRepository = FavoriteRepositoryImpl(apiClient: apiClient)
@@ -167,6 +172,9 @@ public final class AppDependencies: ObservableObject {
             }
         )
         self.syncCoordinator = syncCoordinator
+        // D2-I7-04 Step 2D-2：把 SyncCoordinator 的会话变更广播绑到 MessageRepository，
+        // 让 `ChatViewModel.conversationChanged(for:)` 在 pull 落库后立即收到事件。
+        messageRepository.bindConversationsChanged(syncCoordinator.conversationsChangedPublisher)
         // 队列变化时让 SyncCoordinator 主动刷新 pendingCount 给 UI。
         Task { [weak syncCoordinator, syncEngine] in
             await syncEngine.setOnQueueChanged { [weak syncCoordinator] in

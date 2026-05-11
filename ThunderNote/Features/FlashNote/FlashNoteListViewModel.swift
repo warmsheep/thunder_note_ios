@@ -129,6 +129,7 @@ public final class FlashNoteListViewModel: ObservableObject {
             applyLocalUpdate(noteId: FlashNote.inboxId) { local in
                 local.latestMessage = nil
             }
+            messageRepository.clearLocalConversation(key: .flashNote(FlashNote.inboxId))
         } catch let api as APIError {
             transientMessage = api.displayMessage
         } catch {

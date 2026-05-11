@@ -13,6 +13,7 @@ public protocol MessageLocalDao: Sendable {
     func findByClientRequestId(username: String, clientRequestId: String) throws -> Message?
     func deleteByConversation(username: String, conversationKey: Int64) throws
     func deleteAllForUsername(_ username: String) throws
+    func deleteByIds(username: String, ids: [Int64]) throws
     func countByConversation(username: String, conversationKey: Int64) throws -> Int
 }
 
@@ -85,6 +86,20 @@ public final class SQLiteMessageLocalDao: MessageLocalDao {
             try handle.execute(
                 "DELETE FROM messages_local WHERE username = ? AND conversation_key = ?",
                 bindings: [.text(username), .int64(conversationKey)]
+            )
+        }
+    }
+
+    public func deleteByIds(username: String, ids: [Int64]) throws {
+        guard !ids.isEmpty else { return }
+        try database.write { handle in
+            // 用 `?, ?, ?` 占位符拼出 IN 列表（sqlite 没有数组绑定）。
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            var bindings: [TNValue] = [.text(username)]
+            bindings.append(contentsOf: ids.map { .int64($0) })
+            try handle.execute(
+                "DELETE FROM messages_local WHERE username = ? AND id IN (\(placeholders))",
+                bindings: bindings
             )
         }
     }
