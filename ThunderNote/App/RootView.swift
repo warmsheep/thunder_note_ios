@@ -1,30 +1,20 @@
 import SwiftUI
 
+/// 顶层路由：根据 `AuthSession.state` 切换 Splash / Login / MainShell。
 struct RootView: View {
+    @EnvironmentObject private var session: AuthSession
+
     var body: some View {
-        ZStack {
-            DesignTokens.Color.background
-                .ignoresSafeArea()
-
-            VStack(spacing: DesignTokens.Spacing.medium) {
-                Image(systemName: "bolt.circle.fill")
-                    .font(.system(size: 72))
-                    .foregroundStyle(DesignTokens.Color.brandPrimary)
-
-                Text("闪记")
-                    .font(DesignTokens.Typography.titleLarge)
-                    .foregroundStyle(DesignTokens.Color.textPrimary)
-                    .accessibilityIdentifier("rootBrandTitle")
-
-                Text("阶段 I-0：工程基线")
-                    .font(DesignTokens.Typography.body)
-                    .foregroundStyle(DesignTokens.Color.textSecondary)
+        Group {
+            switch session.state {
+            case .unknown:
+                SplashView()
+            case .anonymous:
+                LoginView()
+            case .authenticated:
+                MainShellView()
             }
-            .padding(DesignTokens.Spacing.large)
         }
+        .accessibilityIdentifier("rootView")
     }
-}
-
-#Preview {
-    RootView()
 }

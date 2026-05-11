@@ -2,13 +2,17 @@ import SwiftUI
 
 @main
 struct ThunderNoteApp: App {
-    init() {
-        CacheVersionMigrator.shared.migrateIfNeeded()
-    }
+    @StateObject private var dependencies = AppDependencies()
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                .environmentObject(dependencies.session)
+                .environmentObject(dependencies.authViewModel)
+                .environmentObject(dependencies.serverConfigObservable)
+                .task {
+                    dependencies.bootstrap()
+                }
         }
     }
 }
