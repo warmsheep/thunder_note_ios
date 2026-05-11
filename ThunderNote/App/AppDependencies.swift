@@ -11,6 +11,8 @@ public final class AppDependencies: ObservableObject {
     public let apiClient: APIClient
     public let authRepository: AuthRepository
     public let authViewModel: AuthViewModel
+    public let flashNoteRepository: FlashNoteRepository
+    public let flashNoteListViewModel: FlashNoteListViewModel
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -34,13 +36,16 @@ public final class AppDependencies: ObservableObject {
             tokenAccessor: tokenAccessor
         )
         let authRepository = AuthRepositoryImpl(apiClient: apiClient)
+        let flashNoteRepository = FlashNoteRepositoryImpl(apiClient: apiClient)
 
         self.serverConfigStore = serverConfigStore
         self.tokenStore = tokenStore
         self.session = session
         self.apiClient = apiClient
         self.authRepository = authRepository
+        self.flashNoteRepository = flashNoteRepository
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
+        self.flashNoteListViewModel = FlashNoteListViewModel(repository: flashNoteRepository)
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,
             onSwitched: { [weak tokenStore, weak session] in
@@ -50,6 +55,11 @@ public final class AppDependencies: ObservableObject {
                 }
             }
         )
+    }
+
+    /// 工厂：根据 list 弹出的「新建 / 编辑」请求构造对应 ViewModel。
+    public func makeFlashNoteEditViewModel(_ mode: FlashNoteEditViewModel.Mode) -> FlashNoteEditViewModel {
+        FlashNoteEditViewModel(mode: mode, repository: flashNoteRepository)
     }
 
     public func bootstrap() {

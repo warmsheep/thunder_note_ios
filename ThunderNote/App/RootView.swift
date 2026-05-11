@@ -12,7 +12,7 @@ struct RootView: View {
             case .anonymous:
                 LoginView()
             case .authenticated:
-                MainShellView()
+                MainTabView()
             }
         }
         .accessibilityIdentifier("rootView")

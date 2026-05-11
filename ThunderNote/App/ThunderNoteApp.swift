@@ -7,6 +7,7 @@ struct ThunderNoteApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .environmentObject(dependencies)
                 .environmentObject(dependencies.session)
                 .environmentObject(dependencies.authViewModel)
                 .environmentObject(dependencies.serverConfigObservable)
