@@ -1,0 +1,127 @@
+name: ThunderNote
+options:
+  bundleIdPrefix: com.flashnote.ios
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: zh-Hans
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+  defaultConfig: Debug
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ENABLE_MODULE_VERIFIER: NO
+    ALWAYS_SEARCH_USER_PATHS: NO
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+
+targets:
+  ThunderNote:
+    type: application
+    platform: iOS
+    sources:
+      - path: ThunderNote
+        excludes:
+          - "**/.DS_Store"
+    info:
+      path: ThunderNote/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: 闪记
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: AccentColor
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: 闪记需要使用相机以拍照后发送到闪记或联系人会话
+        NSMicrophoneUsageDescription: 闪记需要使用麦克风以录制语音消息
+        NSPhotoLibraryUsageDescription: 闪记需要访问相册以选择图片或视频发送
+        NSPhotoLibraryAddUsageDescription: 闪记需要保存图片或视频到相册
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flashnote.ios
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    dependencies:
+      - target: ThunderNoteShareExtension
+    scheme:
+      testTargets:
+        - ThunderNoteTests
+        - ThunderNoteUITests
+      gatherCoverageData: true
+
+  ThunderNoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ThunderNoteTests
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - target: ThunderNote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flashnote.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/ThunderNote.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ThunderNote
+
+  ThunderNoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ThunderNoteUITests
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - target: ThunderNote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flashnote.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ThunderNote
+
+  ThunderNoteShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ThunderNoteShareExtension
+        excludes:
+          - "**/.DS_Store"
+    info:
+      path: ThunderNoteShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: 闪记分享
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsImageWithMaxCount: 20
+              NSExtensionActivationSupportsMovieWithMaxCount: 5
+              NSExtensionActivationSupportsFileWithMaxCount: 20
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flashnote.ios.shareextension
+        TARGETED_DEVICE_FAMILY: "1"
