@@ -180,4 +180,77 @@ public final class AppDependencies: ObservableObject {
         }
         return ok
     }
+
+    // MARK: - D2-I2-13 / D2-I2-14 快速捕获
+
+    /// 工厂：构造全屏快速捕获文本编辑器的 ViewModel。
+    /// `submit` 闭包封装了「临时 ChatViewModel.sendText 写收集箱 + 成功后刷新预览」。
+    public func makeQuickCaptureTextEditorViewModel() -> QuickCaptureTextEditorViewModel {
+        QuickCaptureTextEditorViewModel { [weak self] text in
+            guard let self else { return false }
+            return await self.submitQuickCaptureText(text)
+        }
+    }
+
+    /// D2-I2-14 快速捕获文本：写到收集箱（`flashNoteId = -1`），成功后刷新预览。
+    @MainActor
+    public func submitQuickCaptureText(_ rawText: String) async -> Bool {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let vm = makeChatViewModel(key: .flashNote(FlashNote.inboxId), title: "收集箱")
+        vm.inputText = trimmed
+        await vm.sendText()
+        let ok = vm.items.last?.status == .sent
+        if ok {
+            flashNoteListViewModel.updateInboxPreviewLocally(trimmed)
+        }
+        return ok
+    }
+
+    /// D2-I2-13 快速捕获图片：写到收集箱，预览刷成「[图片]」。
+    @MainActor
+    public func submitQuickCaptureImage(localURL: URL) async -> Bool {
+        await submitQuickCaptureMedia(.image, localURL: localURL, previewText: "[图片]")
+    }
+
+    /// D2-I2-13 快速捕获视频：写到收集箱，预览刷成「[视频]」。
+    @MainActor
+    public func submitQuickCaptureVideo(localURL: URL) async -> Bool {
+        await submitQuickCaptureMedia(.video, localURL: localURL, previewText: "[视频]")
+    }
+
+    /// D2-I2-13 快速捕获文件：写到收集箱，预览带文件名。
+    @MainActor
+    public func submitQuickCaptureFile(localURL: URL) async -> Bool {
+        let preview = "[文件] \(localURL.lastPathComponent)"
+        return await submitQuickCaptureMedia(.file, localURL: localURL, previewText: preview)
+    }
+
+    private enum QuickCaptureMediaKind {
+        case image, video, file
+    }
+
+    /// 媒体快速捕获统一通道：构造一次性 `ChatViewModel`，调对应 `sendXxx`，
+    /// 成功后刷新收集箱预览。失败则把临时 ChatViewModel 的 `transientMessage`
+    /// 转成 `FlashNoteListViewModel.transientMessage`，让列表 alert 起来。
+    @MainActor
+    private func submitQuickCaptureMedia(
+        _ kind: QuickCaptureMediaKind,
+        localURL: URL,
+        previewText: String
+    ) async -> Bool {
+        let vm = makeChatViewModel(key: .flashNote(FlashNote.inboxId), title: "收集箱")
+        switch kind {
+        case .image: await vm.sendImage(localURL: localURL)
+        case .video: await vm.sendVideo(localURL: localURL)
+        case .file: await vm.sendFile(localURL: localURL)
+        }
+        let ok = vm.items.last?.status == .sent
+        if ok {
+            flashNoteListViewModel.updateInboxPreviewLocally(previewText)
+        } else if let message = vm.transientMessage {
+            flashNoteListViewModel.transientMessage = message
+        }
+        return ok
+    }
 }

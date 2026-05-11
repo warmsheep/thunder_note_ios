@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 struct FlashNoteListView: View {
     @StateObject var viewModel: FlashNoteListViewModel
@@ -17,16 +19,33 @@ struct FlashNoteListView: View {
     /// D2-I2-11 是否弹出「清空收集箱」二次确认。
     @State private var presentClearInboxConfirm: Bool = false
 
+    // MARK: - D2-I2-13 / D2-I2-14 快速捕获状态
+    @State private var presentQuickCaptureMenu: Bool = false
+    @State private var presentQuickCaptureText: Bool = false
+    @State private var presentQuickCaptureImagePicker: Bool = false
+    @State private var presentQuickCaptureVideoPicker: Bool = false
+    @State private var presentQuickCaptureFilePicker: Bool = false
+    @State private var presentQuickCaptureCamera: Bool = false
+    @State private var presentQuickCaptureCard: Bool = false
+    @StateObject private var quickCaptureImagePickerHelper = PhotosPickerHelper()
+    @StateObject private var quickCaptureVideoPickerHelper = PhotosPickerHelper()
+
     var body: some View {
         NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                ShareInboxBannerView(
-                    pendingCount: shareInboxConsumer.pendingEntries.count,
-                    onTap: {
-                        shareInboxEntry = shareInboxConsumer.pendingEntries.first
-                    }
-                )
-                content
+            ZStack(alignment: .bottomTrailing) {
+                VStack(spacing: 0) {
+                    ShareInboxBannerView(
+                        pendingCount: shareInboxConsumer.pendingEntries.count,
+                        onTap: {
+                            shareInboxEntry = shareInboxConsumer.pendingEntries.first
+                        }
+                    )
+                    content
+                }
+                // D2-I2-13 右下角快速捕获 FAB；点击弹出 6 入口菜单。
+                QuickCaptureFAB(onTap: { presentQuickCaptureMenu = true })
+                    .padding(.trailing, DesignTokens.Spacing.large)
+                    .padding(.bottom, DesignTokens.Spacing.large)
             }
                 .navigationTitle("闪记")
                 .navigationBarTitleDisplayMode(.large)
@@ -103,6 +122,19 @@ struct FlashNoteListView: View {
                         }
                     )
                 }
+                .modifier(QuickCaptureModifier(
+                    presentMenu: $presentQuickCaptureMenu,
+                    presentText: $presentQuickCaptureText,
+                    presentImagePicker: $presentQuickCaptureImagePicker,
+                    presentVideoPicker: $presentQuickCaptureVideoPicker,
+                    presentFilePicker: $presentQuickCaptureFilePicker,
+                    presentCamera: $presentQuickCaptureCamera,
+                    presentCard: $presentQuickCaptureCard,
+                    imagePickerHelper: quickCaptureImagePickerHelper,
+                    videoPickerHelper: quickCaptureVideoPickerHelper,
+                    dependencies: dependencies,
+                    flashNoteListViewModel: viewModel
+                ))
         }
     }
 
