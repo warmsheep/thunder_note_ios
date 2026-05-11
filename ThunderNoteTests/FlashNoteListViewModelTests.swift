@@ -101,6 +101,116 @@ final class FlashNoteListViewModelTests: XCTestCase {
         }
     }
 
+    // MARK: - D2-I2-11 清空收集箱
+
+    @MainActor
+    func test_clearInbox_callsRepoAndClearsLatestMessageLocally() async {
+        let repo = StubFlashNoteRepository(notes: [
+            FlashNote(id: -1, latestMessage: "旧预览", inbox: true),
+            FlashNote(id: 1, title: "其他")
+        ])
+        let msgRepo = StubInboxClearingMessageRepository()
+        let vm = FlashNoteListViewModel(
+            repository: repo,
+            messageRepository: msgRepo
+        )
+        await vm.load()
+
+        await vm.clearInbox()
+
+        XCTAssertEqual(msgRepo.clearInboxCallCount, 1)
+        XCTAssertNil(vm.note(byId: -1)?.latestMessage, "成功后本地预览应被抹掉")
+        XCTAssertNil(vm.transientMessage)
+        XCTAssertFalse(vm.isClearingInbox)
+    }
+
+    @MainActor
+    func test_clearInbox_apiFailureSetsTransientAndKeepsLatestMessage() async {
+        let repo = StubFlashNoteRepository(notes: [
+            FlashNote(id: -1, latestMessage: "保留预览", inbox: true)
+        ])
+        let msgRepo = StubInboxClearingMessageRepository(
+            failOnClearInbox: APIError.business(code: 50000, message: "清空失败")
+        )
+        let vm = FlashNoteListViewModel(
+            repository: repo,
+            messageRepository: msgRepo
+        )
+        await vm.load()
+
+        await vm.clearInbox()
+
+        XCTAssertEqual(vm.transientMessage, "清空失败")
+        XCTAssertEqual(vm.note(byId: -1)?.latestMessage, "保留预览", "失败时不应抹掉本地预览")
+        XCTAssertFalse(vm.isClearingInbox, "无论成败 isClearingInbox 都必须复位")
+    }
+
+    @MainActor
+    func test_clearInbox_withoutMessageRepository_setsTransientMessage() async {
+        let repo = StubFlashNoteRepository(notes: [
+            FlashNote(id: -1, inbox: true)
+        ])
+        // 没传 messageRepository，模拟未配置场景
+        let vm = FlashNoteListViewModel(repository: repo)
+        await vm.load()
+
+        await vm.clearInbox()
+
+        XCTAssertEqual(vm.transientMessage, "消息仓库未初始化，无法清空收集箱")
+    }
+
+    // MARK: - D2-I2-12 收集箱预览本地更新
+
+    @MainActor
+    func test_updateInboxPreviewLocally_writesTrimmedTextAndUpdatesUpdatedAt() async {
+        let repo = StubFlashNoteRepository(notes: [
+            FlashNote(
+                id: -1,
+                latestMessage: "旧预览",
+                inbox: true,
+                updatedAt: "2020-01-01T00:00:00"
+            )
+        ])
+        let vm = FlashNoteListViewModel(
+            repository: repo,
+            messageRepository: StubInboxClearingMessageRepository()
+        )
+        await vm.load()
+
+        vm.updateInboxPreviewLocally("  快速捕获文本   ")
+
+        XCTAssertEqual(vm.note(byId: -1)?.latestMessage, "快速捕获文本")
+        XCTAssertNotEqual(
+            vm.note(byId: -1)?.updatedAt,
+            "2020-01-01T00:00:00",
+            "updatedAt 应被刷成本地当前时间"
+        )
+    }
+
+    @MainActor
+    func test_updateInboxPreviewLocally_blankInputIsIgnored() async {
+        let repo = StubFlashNoteRepository(notes: [
+            FlashNote(
+                id: -1,
+                latestMessage: "旧预览",
+                inbox: true,
+                updatedAt: "2020-01-01T00:00:00"
+            )
+        ])
+        let vm = FlashNoteListViewModel(
+            repository: repo,
+            messageRepository: StubInboxClearingMessageRepository()
+        )
+        await vm.load()
+
+        vm.updateInboxPreviewLocally(nil)
+        vm.updateInboxPreviewLocally("")
+        vm.updateInboxPreviewLocally("    ")
+
+        XCTAssertEqual(vm.note(byId: -1)?.latestMessage, "旧预览", "空白输入应被忽略")
+        XCTAssertEqual(vm.note(byId: -1)?.updatedAt, "2020-01-01T00:00:00")
+    }
+
     @MainActor
     func test_upsertCreated_insertsAndResorts() async {
         let repo = StubFlashNoteRepository(notes: [
@@ -167,5 +277,41 @@ private final class StubFlashNoteRepository: FlashNoteRepository, @unchecked Sen
 
     func delete(id: Int64) async throws {
         queue.sync { _deleteCalls.append(id) }
+    }
+}
+
+/// 仅用于覆盖 D2-I2-11 / D2-I2-12 用到的 `MessageRepository.clearInbox()`，
+/// 其余成员维持空实现 / 占位返回值。
+private final class StubInboxClearingMessageRepository: MessageRepository, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "tn.tests.flashnote.inboxstub")
+    private var _clearInboxCallCount: Int = 0
+    private var _failOnClearInbox: APIError?
+
+    init(failOnClearInbox: APIError? = nil) {
+        self._failOnClearInbox = failOnClearInbox
+    }
+
+    var clearInboxCallCount: Int {
+        queue.sync { _clearInboxCallCount }
+    }
+
+    func listMessages(key: ConversationKey, page: Int, limit: Int) async throws -> PageData<Message> {
+        PageData(records: [], total: 0, size: Int64(limit), current: 1, pages: 1)
+    }
+    func send(_ message: Message) async throws -> Message { message }
+    func delete(id: Int64) async throws {}
+    func deleteBatch(ids: [Int64]) async throws {}
+    func clearInbox() async throws {
+        let snapshot: APIError? = queue.sync {
+            _clearInboxCallCount += 1
+            return _failOnClearInbox
+        }
+        if let err = snapshot { throw err }
+    }
+    func merge(_ request: MessageMergeRequest) async throws -> Message {
+        Message(id: 1, content: request.title, mediaType: "COMPOSITE")
+    }
+    func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
+        Message(id: 1, content: request.title, mediaType: "COMPOSITE")
     }
 }

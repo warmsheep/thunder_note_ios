@@ -66,7 +66,10 @@ public final class AppDependencies: ObservableObject {
             tokenAccessor: tokenAccessor,
             mediaUrlResolver: mediaUrlResolver
         )
-        let flashNoteListViewModel = FlashNoteListViewModel(repository: flashNoteRepository)
+        let flashNoteListViewModel = FlashNoteListViewModel(
+            repository: flashNoteRepository,
+            messageRepository: messageRepository
+        )
 
         self.serverConfigStore = serverConfigStore
         self.tokenStore = tokenStore
@@ -168,6 +171,11 @@ public final class AppDependencies: ObservableObject {
         // 发送成功的判断：items 最后一条状态应为 .sent
         let ok = vm.items.last?.status == .sent
         if ok {
+            // D2-I2-12 收集箱预览本地更新：往收集箱发文本成功后，立刻把列表
+            // 收集箱行的预览刷成最新一条，不等远端 sync 回来。
+            if key.isInbox {
+                flashNoteListViewModel.updateInboxPreviewLocally(text)
+            }
             shareInboxConsumer.markConsumed(entry)
         }
         return ok

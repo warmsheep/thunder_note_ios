@@ -14,6 +14,8 @@ struct FlashNoteListView: View {
     @State private var showError: Bool = false
     @State private var path: [ChatRoute] = []
     @State private var shareInboxEntry: ShareInboxEntry?
+    /// D2-I2-11 是否弹出「清空收集箱」二次确认。
+    @State private var presentClearInboxConfirm: Bool = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -67,6 +69,18 @@ struct FlashNoteListView: View {
                     Button("好") { viewModel.clearTransientMessage() }
                 } message: {
                     Text(viewModel.transientMessage ?? "")
+                }
+                .alert(
+                    "清空收集箱",
+                    isPresented: $presentClearInboxConfirm
+                ) {
+                    Button("清空", role: .destructive) {
+                        Task { await viewModel.clearInbox() }
+                    }
+                    .accessibilityIdentifier("flashNoteClearInboxConfirm")
+                    Button("取消", role: .cancel) { }
+                } message: {
+                    Text("确定要清空收集箱所有消息吗？删除后不可恢复。")
                 }
                 .sheet(item: $presentedEditMode) { mode in
                     FlashNoteEditSheet(
@@ -123,7 +137,16 @@ struct FlashNoteListView: View {
                 .buttonStyle(.plain)
                 .listRowSeparator(.visible)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if !note.isInbox {
+                        if note.isInbox {
+                            // D2-I2-11 收集箱左滑：替代删除项，弹「清空收集箱」二次确认。
+                            Button(role: .destructive) {
+                                presentClearInboxConfirm = true
+                            } label: {
+                                Label("清空", systemImage: "tray")
+                            }
+                            .accessibilityIdentifier("flashNoteSwipeClearInbox")
+                            .disabled(viewModel.isClearingInbox)
+                        } else {
                             Button(role: .destructive) {
                                 pendingDeletion = note
                             } label: {
@@ -168,7 +191,17 @@ struct FlashNoteListView: View {
         }
         .accessibilityIdentifier("flashNotePinAction-\(note.id)")
 
-        if !note.isInbox {
+        if note.isInbox {
+            // D2-I2-11 收集箱长按菜单：唯一可破坏性入口为「清空收集箱」。
+            Divider()
+            Button(role: .destructive) {
+                presentClearInboxConfirm = true
+            } label: {
+                Label("清空收集箱", systemImage: "tray")
+            }
+            .disabled(viewModel.isClearingInbox)
+            .accessibilityIdentifier("flashNoteClearInboxAction")
+        } else {
             Button {
                 Task { await viewModel.toggleHidden(note) }
             } label: {
