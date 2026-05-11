@@ -16,6 +16,7 @@ struct ProfileTabView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     @StateObject var viewModel: ProfileViewModel
     @StateObject var statsViewModel: ProfileStatsViewModel
+    @EnvironmentObject private var syncCoordinator: SyncCoordinator
 
     var body: some View {
         NavigationStack {
@@ -117,8 +118,59 @@ struct ProfileTabView: View {
                 .accessibilityIdentifier("profileEditEntry")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            // D2-I7-08 右上角手动同步按钮：同步中转圈、失败上抛 toast。
+            syncButton
+                .padding(.top, 50)
+                .padding(.trailing, DesignTokens.Spacing.medium)
         }
         .frame(height: 220)
+        .onChange(of: syncCoordinator.transientMessage) { newValue in
+            guard let msg = newValue, !msg.isEmpty else { return }
+            ToastCenter.shared.show(key: "Sync:\(msg)", message: msg)
+            syncCoordinator.clearTransientMessage()
+        }
+    }
+
+    /// D2-I7-08 同步按钮：idle / syncing / failure 三态。
+    /// pendingCount > 0 时显示 badge（Step 1 永远 0；Step 2 接 PendingMessage 表后才会真正点亮）。
+    private var syncButton: some View {
+        Button {
+            Task { await syncCoordinator.manualSync() }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Circle()
+                    .fill(Color.white.opacity(0.22))
+                    .frame(width: 36, height: 36)
+                Group {
+                    if syncCoordinator.state == .syncing {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                    }
+                }
+                .frame(width: 36, height: 36)
+                if syncCoordinator.pendingCount > 0 {
+                    Text("\(min(syncCoordinator.pendingCount, 99))")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                        .offset(x: 6, y: -4)
+                        .accessibilityIdentifier("profileSyncBadge")
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(syncCoordinator.state == .syncing)
+        .accessibilityIdentifier("profileSyncButton")
+        .accessibilityLabel("同步")
     }
 
     @ViewBuilder

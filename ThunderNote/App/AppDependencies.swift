@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 /// 顶层依赖容器：在 App 启动时构造一次。登录态变化触发 Repository 重建逻辑放在这里。
 @MainActor
@@ -17,6 +18,10 @@ public final class AppDependencies: ObservableObject {
     public let userRepository: UserRepository
     public let profileViewModel: ProfileViewModel
     public let profileStatsViewModel: ProfileStatsViewModel
+    public let database: TNDatabase
+    public let syncMetaDao: SyncMetaDao
+    public let syncRepository: SyncRepository
+    public let syncCoordinator: SyncCoordinator
     public let messageRepository: MessageRepository
     public let draftStore: DraftStore
     public let collectionRepository: CollectionRepository
@@ -35,10 +40,27 @@ public final class AppDependencies: ObservableObject {
     public let scrollAnchorStore: ChatScrollAnchorStore
     public let authenticatedImageLoader: AuthenticatedImageLoader
 
+    /// D2-I7 监听 AuthSession.state，在切到 authenticated 时触发 bootstrapIfNeeded。
+    private var sessionStateCancellable: AnyCancellable? = nil
+
     public init() {
         let serverConfigStore = ServerConfigStore()
         let tokenStore = KeychainTokenStore()
         let session = AuthSession(tokenStore: tokenStore)
+        // D2-I7 SQLite 数据库：Library/Application Support/tn/tn.sqlite3。
+        // 打开 / migration 失败时让 App 立刻崩，避免静默走没有本地表的不可控路径。
+        let appSupportRoot = (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
+        let dbURL = appSupportRoot
+            .appendingPathComponent("tn", isDirectory: true)
+            .appendingPathComponent("tn.sqlite3")
+        let database: TNDatabase
+        do {
+            database = try TNDatabase(fileURL: dbURL)
+        } catch {
+            fatalError("TNDatabase 打开 / migration 失败：\(error)")
+        }
+        let syncMetaDao: SyncMetaDao = SQLiteSyncMetaDao(database: database)
         let urlSession = URLSession(configuration: .default)
         let tokenAccessor = DefaultTokenAccessor(
             tokenStore: tokenStore,
@@ -97,11 +119,32 @@ public final class AppDependencies: ObservableObject {
         )
         self.userRepository = userRepository
         self.profileViewModel = ProfileViewModel(repository: userRepository, fileRepository: fileRepository)
-        self.profileStatsViewModel = ProfileStatsViewModel(
+        let profileStatsViewModel = ProfileStatsViewModel(
             flashNoteRepository: flashNoteRepository,
             favoriteRepository: favoriteRepository,
             messageRepository: messageRepository,
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
+        self.profileStatsViewModel = profileStatsViewModel
+        self.database = database
+        self.syncMetaDao = syncMetaDao
+        let syncRepository = SyncRepositoryImpl(
+            apiClient: apiClient,
+            syncMetaDao: syncMetaDao,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
+        self.syncRepository = syncRepository
+        // pull / bootstrap 成功后顺手刷新统计 + 闪记列表（轻量），与 Android `pullAndRefreshLocal` 等价。
+        // Step 2 会把 messageRepository.refreshLocalConversations 一并接进来。
+        let flashNoteListViewModelRef = flashNoteListViewModel
+        self.syncCoordinator = SyncCoordinator(
+            syncRepository: syncRepository,
+            onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileStatsViewModel] _ in
+                if let vm = flashNoteListViewModelRef {
+                    await vm.refresh()
+                }
+                await profileStatsViewModel?.refresh()
+            }
         )
         self.collectionsViewModel = CollectionsViewModel(
             collectionRepository: collectionRepository,
@@ -173,6 +216,15 @@ public final class AppDependencies: ObservableObject {
         session.setSignOutHandler { [weak self] in
             await self?.performSignOutCleanup()
         }
+        // D2-I7-01 / I7-08：authenticated 时主动 bootstrap；登出时由 performSignOutCleanup 清。
+        sessionStateCancellable = session.$state
+            .removeDuplicates()
+            .sink { [weak self] state in
+                guard let self else { return }
+                if case .authenticated = state {
+                    self.syncCoordinator.bootstrapIfNeeded()
+                }
+            }
         session.bootstrap()
         shareInboxConsumer.scan()
     }
@@ -194,6 +246,8 @@ public final class AppDependencies: ObservableObject {
         AvatarLocalCache.clear()
         ToastCenter.shared.dismissCurrent()
         try? shareInboxStore?.clearAll()
+        // D2-I7：sync 状态机回 idle、bootstrap Task 释放。
+        syncCoordinator.resetForSignOut()
     }
 
     /// 处理 ShareInbox 里的一条 text 条目：落到对应会话（`ChatViewModel.sendText`）。
