@@ -21,6 +21,13 @@ public protocol MessageRepository: Sendable {
 
     /// 清空收集箱（`flashNoteId=-1`）下当前用户所有消息。
     func clearInbox() async throws
+
+    /// 把已有消息合并成 COMPOSITE 卡片消息（D2-I3-17）。`POST /api/messages/merge`。
+    func merge(_ request: MessageMergeRequest) async throws -> Message
+
+    /// 直接基于客户端预上传媒体新建 COMPOSITE 卡片消息（D2-I3-19）。
+    /// `POST /api/messages/composite`。
+    func createComposite(_ request: CompositeMessageRequest) async throws -> Message
 }
 
 public final class MessageRepositoryImpl: MessageRepository, @unchecked Sendable {
@@ -95,5 +102,29 @@ public final class MessageRepositoryImpl: MessageRepository, @unchecked Sendable
             requiresAuth: true
         )
         _ = try await apiClient.send(endpoint)
+    }
+
+    public func merge(_ request: MessageMergeRequest) async throws -> Message {
+        let body = try JSONEncoder.tnDefault.encode(request)
+        let endpoint = Endpoint<Message>(
+            method: .post,
+            path: "/api/messages/merge",
+            body: body,
+            requiresAuth: true,
+            headers: ["Content-Type": "application/json; charset=utf-8"]
+        )
+        return try await apiClient.send(endpoint)
+    }
+
+    public func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
+        let body = try JSONEncoder.tnDefault.encode(request)
+        let endpoint = Endpoint<Message>(
+            method: .post,
+            path: "/api/messages/composite",
+            body: body,
+            requiresAuth: true,
+            headers: ["Content-Type": "application/json; charset=utf-8"]
+        )
+        return try await apiClient.send(endpoint)
     }
 }

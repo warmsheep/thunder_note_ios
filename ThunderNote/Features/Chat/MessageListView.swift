@@ -10,7 +10,11 @@ struct MessageListView: View {
     let hasMoreOlder: Bool
     let highlightedMessageId: Int64?
     let scrollTargetMessageId: Int64?
+    let prependAnchorMessageId: Int64?
     let mediaUrlResolver: MediaUrlResolver?
+    /// D2-I3-16 多选模式：是否处于多选；当前选区。
+    let isMultiSelectMode: Bool
+    let selectedRemoteIds: Set<Int64>
     let isFavorited: (ChatMessageItem) -> Bool
     let onCopy: (ChatMessageItem) -> Void
     let onDelete: (ChatMessageItem) -> Void
@@ -19,6 +23,17 @@ struct MessageListView: View {
     let onTapMediaAttachment: (ChatMessageItem) -> Void
     let onReachedTop: () -> Void
     let onScrollTargetConsumed: () -> Void
+    /// D2-I3-03 上层完成 prepend 偏移补正后回调，清掉 anchor 防止重复 scroll。
+    let onPrependAnchorConsumed: () -> Void
+    /// D2-I3-16 长按进入多选 + 切换选中。
+    let onLongPressForMultiSelect: (ChatMessageItem) -> Void
+    let onToggleSelection: (ChatMessageItem) -> Void
+    /// D2-I3-15 媒体扩展菜单：下载 / 外部打开 / 转发；按 mediaType 触发。
+    let onDownloadMedia: (ChatMessageItem) -> Void
+    let onOpenExternally: (ChatMessageItem) -> Void
+    let onForward: (ChatMessageItem) -> Void
+    /// D2-I3-18 卡片消息点击打开详情页。
+    let onOpenCardDetail: (ChatMessageItem) -> Void
 
     @Binding var scrollToken: UUID?
 
@@ -42,12 +57,26 @@ struct MessageListView: View {
                             currentUserId: currentUserId,
                             isFavorited: isFavorited(item),
                             isHighlighted: item.remoteId == highlightedMessageId && highlightedMessageId != nil,
+                            isMultiSelectMode: isMultiSelectMode,
+                            isSelected: isSelected(item),
                             mediaUrlResolver: mediaUrlResolver,
                             onCopy: { onCopy(item) },
                             onDelete: { onDelete(item) },
                             onRetry: { onRetry(item) },
                             onToggleFavorite: { onToggleFavorite(item) },
-                            onTapMediaAttachment: { onTapMediaAttachment(item) }
+                            onTapMediaAttachment: {
+                                if isMultiSelectMode {
+                                    onToggleSelection(item)
+                                } else {
+                                    onTapMediaAttachment(item)
+                                }
+                            },
+                            onLongPressForMultiSelect: { onLongPressForMultiSelect(item) },
+                            onToggleSelection: { onToggleSelection(item) },
+                            onDownloadMedia: { onDownloadMedia(item) },
+                            onOpenExternally: { onOpenExternally(item) },
+                            onForward: { onForward(item) },
+                            onOpenCardDetail: { onOpenCardDetail(item) }
                         )
                         .id(item.id)
                     }
@@ -77,8 +106,21 @@ struct MessageListView: View {
                 }
                 onScrollTargetConsumed()
             }
+            .onChange(of: prependAnchorMessageId) { newValue in
+                guard let anchor = newValue else { return }
+                // D2-I3-03 prepend 偏移补正：把 anchor 对应的气泡保持在视图顶部位置，
+                // 与 prepend 前的视觉位置等价；不带动画，避免感知到跳变。
+                let id = "remote:\(anchor)"
+                proxy.scrollTo(id, anchor: .top)
+                onPrependAnchorConsumed()
+            }
         }
         .accessibilityIdentifier("chatMessageList")
+    }
+
+    private func isSelected(_ item: ChatMessageItem) -> Bool {
+        guard let remoteId = item.remoteId else { return false }
+        return selectedRemoteIds.contains(remoteId)
     }
 
     private var loadMoreSpinner: some View {

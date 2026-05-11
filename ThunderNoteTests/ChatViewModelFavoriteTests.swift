@@ -128,4 +128,10 @@ private final class NoopMessageRepository: MessageRepository, @unchecked Sendabl
     func delete(id: Int64) async throws {}
     func deleteBatch(ids: [Int64]) async throws {}
     func clearInbox() async throws {}
+    func merge(_ request: MessageMergeRequest) async throws -> Message {
+        Message(id: 1, content: request.title, mediaType: "COMPOSITE")
+    }
+    func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
+        Message(id: 1, content: request.title, mediaType: "COMPOSITE")
+    }
 }

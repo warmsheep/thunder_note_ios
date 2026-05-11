@@ -97,6 +97,72 @@ final class MessageRepositoryTests: XCTestCase {
         try await repo.deleteBatch(ids: [])
     }
 
+    func test_merge_postsMergeBodyAndDecodes() async throws {
+        let payload = """
+        {"code":0,"message":"OK","data":{
+          "id":777,"senderId":1,"receiverId":1,"flashNoteId":2,"mediaType":"COMPOSITE","content":"标题",
+          "payload":{
+            "cardType":"MESSAGE_COLLECTION","title":"标题","summary":"hi 等2条消息",
+            "items":[
+              {"originalMsgId":1,"type":"TEXT","content":"hi","senderId":1,"role":"user"},
+              {"originalMsgId":2,"type":"TEXT","content":"hello","senderId":1,"role":"user"}
+            ]
+          },
+          "createdAt":"2026-05-11T10:02:00"
+        },"timestamp":0}
+        """
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/messages/merge")
+            XCTAssertEqual(request.httpMethod, "POST")
+            return (HTTPURLResponse.make(url: request.url!, status: 200), Data(payload.utf8))
+        }
+        let repo = makeRepository()
+        let result = try await repo.merge(MessageMergeRequest(
+            title: "标题",
+            messageIds: [1, 2],
+            flashNoteId: 2,
+            receiverId: nil
+        ))
+        XCTAssertEqual(result.id, 777)
+        XCTAssertEqual(result.payload?.cardType, "MESSAGE_COLLECTION")
+        XCTAssertEqual(result.payload?.items?.count, 2)
+        XCTAssertEqual(result.payload?.items?.first?.content, "hi")
+    }
+
+    func test_createComposite_postsCompositeBodyAndDecodes() async throws {
+        let payload = """
+        {"code":0,"message":"OK","data":{
+          "id":888,"senderId":1,"receiverId":1,"flashNoteId":2,"mediaType":"COMPOSITE","content":"卡片",
+          "payload":{
+            "cardType":"COMPOSITE_MEDIA","title":"卡片",
+            "items":[
+              {"type":"image","url":"1/abc.jpg","thumbnailUrl":"1/abc.thumb.jpg"}
+            ]
+          },
+          "createdAt":"2026-05-11T10:03:00"
+        },"timestamp":0}
+        """
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/messages/composite")
+            XCTAssertEqual(request.httpMethod, "POST")
+            return (HTTPURLResponse.make(url: request.url!, status: 200), Data(payload.utf8))
+        }
+        let repo = makeRepository()
+        let req = CompositeMessageRequest(
+            title: "卡片",
+            content: nil,
+            flashNoteId: 2,
+            receiverId: nil,
+            items: [
+                .init(type: "image", mediaUrl: "1/abc.jpg", thumbnailUrl: "1/abc.thumb.jpg")
+            ]
+        )
+        let result = try await repo.createComposite(req)
+        XCTAssertEqual(result.id, 888)
+        XCTAssertEqual(result.payload?.items?.first?.mediaUrl, "1/abc.jpg")
+        XCTAssertEqual(result.payload?.items?.first?.resolvedMediaType, .image)
+    }
+
     private func makeRepository() -> MessageRepositoryImpl {
         let serverConfig = StaticServerConfig(baseURL: baseURL)
         let tokenStore = InMemoryTokenStore()

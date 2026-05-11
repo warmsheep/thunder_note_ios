@@ -211,4 +211,12 @@ private final class StubMessageRepository: MessageRepository, @unchecked Sendabl
     }
 
     func clearInbox() async throws {}
+
+    func merge(_ request: MessageMergeRequest) async throws -> Message {
+        Message(id: 1, content: request.title, mediaType: "COMPOSITE")
+    }
+
+    func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
+        Message(id: 1, content: request.title, mediaType: "COMPOSITE")
+    }
 }

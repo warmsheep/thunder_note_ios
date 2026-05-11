@@ -44,6 +44,15 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var scrollTargetMessageId: Int64? = nil
     /// `D2-I3-05` 用：当前需要黄底高亮的消息（短暂闪烁 1.5s 后归零）。
     @Published public private(set) var highlightedMessageId: Int64? = nil
+    /// `D2-I3-16` 多选模式开关。进入后 MessageBubble 显示 checkbox。
+    @Published public private(set) var isMultiSelectMode: Bool = false
+    /// `D2-I3-16` 当前多选选中的远端消息 id 集合。
+    @Published public private(set) var selectedRemoteIds: Set<Int64> = []
+    /// `D2-I3-17` 合并卡片标题输入 sheet 显示状态。
+    @Published public var presentMergeSheet: Bool = false
+    /// `D2-I3-03` 加载更早消息时的 prepend 锚点 messageId；UI 收到变化后会
+    /// 把滚动位置稳定在该 id 对应气泡（避免视觉跳顶）。
+    @Published public private(set) var prependAnchorMessageId: Int64? = nil
 
     public let configuration: Configuration
     public var key: ConversationKey { configuration.key }
@@ -59,7 +68,10 @@ public final class ChatViewModel: ObservableObject {
     private let mediaPreloader: MessageMediaPreloader?
     private let session: AuthSession
     private let draftStore: DraftStore
+    private let scrollAnchorStore: ChatScrollAnchorStore?
     private var nextPage: Int = 1
+    /// `D2-I3-04` 进入会话时根据 anchorStore 读出的恢复目标，加载首页后用于定位。
+    private var pendingRestoreAnchorId: Int64? = nil
 
     public init(
         configuration: Configuration,
@@ -69,7 +81,8 @@ public final class ChatViewModel: ObservableObject {
         favoriteRepository: FavoriteRepository? = nil,
         favoriteRegistry: FavoriteIdRegistry? = nil,
         attachmentService: AttachmentSendingService? = nil,
-        mediaPreloader: MessageMediaPreloader? = nil
+        mediaPreloader: MessageMediaPreloader? = nil,
+        scrollAnchorStore: ChatScrollAnchorStore? = nil
     ) {
         self.configuration = configuration
         self.messageRepository = messageRepository
@@ -79,6 +92,7 @@ public final class ChatViewModel: ObservableObject {
         self.mediaPreloader = mediaPreloader
         self.session = session
         self.draftStore = draftStore
+        self.scrollAnchorStore = scrollAnchorStore
         self.inputText = draftStore.get(configuration.key)
     }
 
@@ -136,6 +150,10 @@ public final class ChatViewModel: ObservableObject {
 
     public func onAppear() async {
         if case .idle = loadState {
+            // 仅在 loadInitial 之前读取 anchor，避免重新进入时覆盖最新尾部位置。
+            if configuration.targetMessageId == nil {
+                pendingRestoreAnchorId = scrollAnchorStore?.anchor(for: configuration.key)
+            }
             await loadInitial()
         }
         // 草稿恢复：onAppear 触发，避免初始化阶段尚未发布的状态导致丢字。
@@ -148,6 +166,10 @@ public final class ChatViewModel: ObservableObject {
     public func onDisappear() {
         // 持久化当前草稿到内存级 store。
         draftStore.set(configuration.key, text: inputText)
+        // D2-I3-04：离开会话时把当前已确认的最尾部消息 id 写回 anchor。
+        if let tail = items.reversed().first(where: { ($0.remoteId ?? 0) > 0 })?.remoteId {
+            scrollAnchorStore?.setAnchor(tail, for: configuration.key)
+        }
     }
 
     // MARK: - 加载
@@ -173,10 +195,24 @@ public final class ChatViewModel: ObservableObject {
                 Task.detached { await preloader.preload(items: snapshot, limit: 5) }
             }
             await tryScrollToInitialTarget()
+            // D2-I3-04：若没有 targetMessageId 且 anchor 命中页面，触发滚动恢复。
+            await tryRestoreScrollAnchor()
         } catch let api as APIError {
             loadState = .error(api.displayMessage)
         } catch {
             loadState = .error(error.localizedDescription)
+        }
+    }
+
+    /// 进入会话且首屏加载完成后，尝试按上次离开时的 anchor 把视图滚回去。
+    /// 若首页中没有该消息，则不强行翻页（避免和 targetMessageId 冲突，也避免对新消息很多时的体感不准）。
+    private func tryRestoreScrollAnchor() async {
+        guard configuration.targetMessageId == nil,
+              let anchorId = pendingRestoreAnchorId else { return }
+        defer { pendingRestoreAnchorId = nil }
+        if items.contains(where: { $0.remoteId == anchorId }) {
+            // 锚点命中时静默 scroll（不闪烁），保持「上次看到这里」体感。
+            scrollTargetMessageId = anchorId
         }
     }
 
@@ -221,12 +257,15 @@ public final class ChatViewModel: ObservableObject {
         scrollTargetMessageId = nil
     }
 
-    /// 触底加载更早的一页。当前以 `nextPage` 递增；后续 D2-I3-03 升级为
-    /// 真正的「向上滚加载更早」。
+    /// 触底加载更早的一页。
+    /// D2-I3-03 prepend 偏移补正：发布 `prependAnchorMessageId`（旧 items 的第一条 remoteId），
+    /// MessageListView 收到后会用 `scrollTo(anchor: .top)` 把锚点对齐回原位置，避免视觉跳顶。
     public func loadMoreOlder() async {
         guard !isLoadingMore, hasMoreOlder else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
+        // 记录加载前的顶部锚点：取当前 items 中第一条已确认消息的 remoteId。
+        let preTopAnchorId: Int64? = items.first(where: { ($0.remoteId ?? 0) > 0 })?.remoteId
         do {
             let page = try await messageRepository.listMessages(
                 key: configuration.key,
@@ -242,11 +281,20 @@ public final class ChatViewModel: ObservableObject {
             items = Self.sort(merged)
             hasMoreOlder = page.hasMore
             nextPage = Int(page.safeCurrent) + 1
+            // 发布 prepend anchor：UI 收到后 scrollTo(preTopAnchorId, anchor:.top)
+            if let preTopAnchorId {
+                prependAnchorMessageId = preTopAnchorId
+            }
         } catch let api as APIError {
             transientMessage = api.displayMessage
         } catch {
             transientMessage = error.localizedDescription
         }
+    }
+
+    /// View 完成 prepend 偏移补正后调用，清除锚点避免重复触发。
+    public func didConsumePrependAnchor() {
+        prependAnchorMessageId = nil
     }
 
     public func refresh() async {
@@ -455,6 +503,135 @@ public final class ChatViewModel: ObservableObject {
 
     public func clearTransientMessage() {
         transientMessage = nil
+    }
+
+    // MARK: - 多选模式（D2-I3-16）
+
+    /// 进入多选模式，默认勾选触发项（仅已确认消息可选）。
+    public func enterMultiSelect(initial item: ChatMessageItem? = nil) {
+        isMultiSelectMode = true
+        selectedRemoteIds.removeAll()
+        if let item, let remoteId = item.remoteId, remoteId > 0 {
+            selectedRemoteIds.insert(remoteId)
+        }
+    }
+
+    /// 退出多选模式，清空选区。
+    public func exitMultiSelect() {
+        isMultiSelectMode = false
+        selectedRemoteIds.removeAll()
+    }
+
+    /// 切换某条消息的多选状态。只对已确认消息生效。
+    public func toggleSelection(_ item: ChatMessageItem) {
+        guard let remoteId = item.remoteId, remoteId > 0 else { return }
+        if selectedRemoteIds.contains(remoteId) {
+            selectedRemoteIds.remove(remoteId)
+        } else {
+            selectedRemoteIds.insert(remoteId)
+        }
+    }
+
+    /// 当前选区下的已确认消息（按 items 当前顺序）。
+    public var selectedItems: [ChatMessageItem] {
+        items.filter { item in
+            guard let remoteId = item.remoteId else { return false }
+            return selectedRemoteIds.contains(remoteId)
+        }
+    }
+
+    /// 批量删除选中消息。成功后退出多选。
+    public func deleteSelected() async {
+        let ids = Array(selectedRemoteIds)
+        guard !ids.isEmpty else { return }
+        do {
+            try await messageRepository.deleteBatch(ids: ids)
+            items.removeAll { item in
+                guard let remoteId = item.remoteId else { return false }
+                return selectedRemoteIds.contains(remoteId)
+            }
+            exitMultiSelect()
+        } catch let api as APIError {
+            transientMessage = api.displayMessage
+        } catch {
+            transientMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - 合并卡片（D2-I3-17）
+
+    /// 弹出合并卡片标题输入面板。仅在多选 ≥1 时生效；合并后退出多选并把卡片插入会话。
+    public func openMergeSheet() {
+        guard !selectedRemoteIds.isEmpty else {
+            transientMessage = "请先选择至少一条消息"
+            return
+        }
+        presentMergeSheet = true
+    }
+
+    /// 提交合并。`title` 必填、长度 ≤ 50；服务端会校验 messageIds ≤ 50 / 同一会话。
+    public func mergeSelected(title rawTitle: String) async {
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            transientMessage = "请输入卡片标题"
+            return
+        }
+        guard title.count <= 50 else {
+            transientMessage = "卡片标题最多 50 字"
+            return
+        }
+        // 排序：与 Android `ChatMultiSelectHelper.mergeSelected` 等价 —— 按消息 id 升序
+        let ids = selectedRemoteIds.sorted()
+        guard !ids.isEmpty else { return }
+        guard let userId = currentUserId else {
+            transientMessage = "登录态已失效，请重新登录"
+            return
+        }
+        let request = MessageMergeRequest(
+            title: title,
+            messageIds: ids,
+            flashNoteId: configuration.key.flashNoteIdForRequest,
+            receiverId: peerReceiverId(currentUserId: userId)
+        )
+        do {
+            let confirmed = try await messageRepository.merge(request)
+            // 把卡片消息插入到当前 items（已确认状态）
+            let cardItem = Self.makeItem(from: confirmed)
+            var newItems = items
+            newItems.append(cardItem)
+            items = Self.sort(newItems)
+            presentMergeSheet = false
+            exitMultiSelect()
+        } catch let api as APIError {
+            transientMessage = api.displayMessage
+        } catch {
+            transientMessage = error.localizedDescription
+        }
+    }
+
+    /// 联系人会话的 receiverId（非联系人会话返回 nil）。merge / composite 用。
+    private func peerReceiverId(currentUserId: Int64) -> Int64? {
+        if case .peer(let peerId) = configuration.key { return peerId }
+        return nil
+    }
+
+    /// 卡片编辑器：用客户端预上传的 items 直接新建 COMPOSITE 卡片。
+    /// 由 `CardEditorViewModel` 调用；卡片新建成功后插入会话末尾。
+    public func submitComposite(_ request: CompositeMessageRequest) async -> Bool {
+        do {
+            let confirmed = try await messageRepository.createComposite(request)
+            let cardItem = Self.makeItem(from: confirmed)
+            var newItems = items
+            newItems.append(cardItem)
+            items = Self.sort(newItems)
+            return true
+        } catch let api as APIError {
+            transientMessage = api.displayMessage
+            return false
+        } catch {
+            transientMessage = error.localizedDescription
+            return false
+        }
     }
 
     // MARK: - Helpers

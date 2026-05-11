@@ -200,6 +200,12 @@ private final class StubMediaRepo: MessageRepository, @unchecked Sendable {
     func delete(id: Int64) async throws {}
     func deleteBatch(ids: [Int64]) async throws {}
     func clearInbox() async throws {}
+    func merge(_ request: MessageMergeRequest) async throws -> Message {
+        Message(id: 9999, content: request.title, mediaType: "COMPOSITE")
+    }
+    func createComposite(_ request: CompositeMessageRequest) async throws -> Message {
+        Message(id: 9998, content: request.title, mediaType: "COMPOSITE")
+    }
 }
 
 private final class StubFileRepo: FileRepository, @unchecked Sendable {

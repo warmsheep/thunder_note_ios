@@ -28,6 +28,8 @@ public final class AppDependencies: ObservableObject {
     public let shareInboxConsumer: ShareInboxConsumer
     public let attachmentSendingService: AttachmentSendingService
     public let mediaPreloader: MessageMediaPreloader
+    public let scrollAnchorStore: ChatScrollAnchorStore
+    public let authenticatedImageLoader: AuthenticatedImageLoader
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -95,6 +97,11 @@ public final class AppDependencies: ObservableObject {
         self.shareInboxConsumer = ShareInboxConsumer(store: shareStore)
         self.attachmentSendingService = AttachmentSendingService(fileRepository: fileRepository)
         self.mediaPreloader = MessageMediaPreloader(fileRepository: fileRepository)
+        self.scrollAnchorStore = ChatScrollAnchorStore()
+        self.authenticatedImageLoader = AuthenticatedImageLoader(
+            session: urlSession,
+            tokenAccessor: tokenAccessor
+        )
         self.draftStore = DraftStore()
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,
@@ -130,7 +137,8 @@ public final class AppDependencies: ObservableObject {
             favoriteRepository: favoriteRepository,
             favoriteRegistry: favoriteRegistry,
             attachmentService: attachmentSendingService,
-            mediaPreloader: mediaPreloader
+            mediaPreloader: mediaPreloader,
+            scrollAnchorStore: scrollAnchorStore
         )
     }
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import UIKit
 
 /// 三模式公共聊天页骨架。
 struct ChatView: View {
@@ -13,33 +14,61 @@ struct ChatView: View {
 
     @StateObject private var imagePickerHelper = PhotosPickerHelper()
     @StateObject private var videoPickerHelper = PhotosPickerHelper()
+    @StateObject private var recordingHelper = ChatRecordingHelper()
     @State private var presentImagePicker = false
     @State private var presentVideoPicker = false
     @State private var presentFilePicker = false
+    @State private var presentCameraCapture = false
+    @State private var presentCardEditor = false
     @State private var mediaPreviewRequest: MediaPreviewRequest?
+    @State private var cardDetailMessage: Message? = nil
+    @State private var mergeTitle: String = ""
+    /// 录音长按手势的拖动偏移；y 大于 -60 时进入「上滑取消」区域。
+    @State private var recordingDragOffset: CGSize = .zero
+    /// 当前是否处于录音中（手指未抬起）。
+    @State private var isRecordingActive: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            content
-            ChatInputBar(
-                text: $viewModel.inputText,
-                isSending: viewModel.isSending,
-                onSend: {
-                    Task { await viewModel.sendText() }
-                },
-                onPickImage: { presentImagePicker = true },
-                onPickVideo: { presentVideoPicker = true },
-                onPickFile: { presentFilePicker = true }
-            )
+            if viewModel.isMultiSelectMode {
+                multiSelectTopBar
+            }
+            ZStack(alignment: .bottom) {
+                content
+                if isRecordingActive {
+                    RecordingOverlay(
+                        elapsed: recordingHelper.elapsed,
+                        levels: recordingHelper.levels,
+                        isCancelArea: isInCancelArea
+                    )
+                    .padding(.bottom, 80)
+                    .transition(.opacity)
+                }
+            }
+            inputArea
         }
         .navigationTitle(viewModel.title)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("chatView-\(viewModel.key.descriptor)")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !viewModel.isMultiSelectMode {
+                    Menu {
+                        Button {
+                            presentCardEditor = true
+                        } label: {
+                            Label("新建卡片", systemImage: "rectangle.stack.badge.plus")
+                        }
+                        .accessibilityIdentifier("chatToolbarNewCard")
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+        }
         .task {
             await viewModel.onAppear()
-            // 触发首次滚到底
             scrollToken = UUID()
-            // D2-I2-08：进入会话时自动 unhide 该闪记
             if let onAppearAutoUnhide {
                 await onAppearAutoUnhide()
             }
@@ -80,12 +109,43 @@ struct ChatView: View {
         ) { result in
             handleFilePickerResult(result)
         }
+        .sheet(isPresented: $presentCameraCapture) {
+            CameraCaptureView(
+                onPicked: { url in
+                    presentCameraCapture = false
+                    Task { await viewModel.sendImage(localURL: url) }
+                },
+                onCancel: {
+                    presentCameraCapture = false
+                }
+            )
+            .ignoresSafeArea()
+        }
         .sheet(item: $mediaPreviewRequest) { request in
             MediaPreviewView(
                 viewModel: MediaDownloadViewModel(
                     request: request,
                     fileRepository: dependencies.fileRepository
                 )
+            )
+        }
+        .sheet(isPresented: $presentCardEditor) {
+            CardEditorView(
+                viewModel: CardEditorViewModel(
+                    target: .currentConversation(viewModel.key),
+                    attachmentService: dependencies.attachmentSendingService,
+                    messageRepository: dependencies.messageRepository,
+                    session: dependencies.session
+                ),
+                onSubmitted: {
+                    Task { await viewModel.refresh() }
+                }
+            )
+        }
+        .sheet(item: $cardDetailMessage) { msg in
+            CardDetailView(
+                message: msg,
+                mediaUrlResolver: dependencies.mediaUrlResolver
             )
         }
         .alert(
@@ -99,6 +159,44 @@ struct ChatView: View {
         } message: {
             Text(viewModel.transientMessage ?? "")
         }
+        .alert("合并为卡片", isPresented: $viewModel.presentMergeSheet) {
+            TextField("卡片标题", text: $mergeTitle)
+            Button("取消", role: .cancel) { mergeTitle = "" }
+            Button("合并") {
+                let t = mergeTitle
+                mergeTitle = ""
+                Task { await viewModel.mergeSelected(title: t) }
+            }
+        } message: {
+            Text("将所选 \(viewModel.selectedRemoteIds.count) 条消息合并为一张卡片")
+        }
+    }
+
+    @ViewBuilder
+    private var inputArea: some View {
+        ChatInputBar(
+            text: $viewModel.inputText,
+            isSending: viewModel.isSending,
+            isRecordingActive: $isRecordingActive,
+            onSend: {
+                Task { await viewModel.sendText() }
+            },
+            onPickImage: { presentImagePicker = true },
+            onPickVideo: { presentVideoPicker = true },
+            onPickFile: { presentFilePicker = true },
+            onPickCamera: {
+                if CameraCaptureView.isAvailable {
+                    presentCameraCapture = true
+                } else {
+                    viewModel.transientMessage = "当前设备不支持相机"
+                }
+            },
+            onRecordingDragChanged: { offset in
+                recordingDragOffset = offset
+            },
+            onRecordingStart: { startRecording() },
+            onRecordingFinish: { finishRecording() }
+        )
     }
 
     @ViewBuilder
@@ -121,7 +219,10 @@ struct ChatView: View {
                 hasMoreOlder: viewModel.hasMoreOlder,
                 highlightedMessageId: viewModel.highlightedMessageId,
                 scrollTargetMessageId: viewModel.scrollTargetMessageId,
+                prependAnchorMessageId: viewModel.prependAnchorMessageId,
                 mediaUrlResolver: dependencies.mediaUrlResolver,
+                isMultiSelectMode: viewModel.isMultiSelectMode,
+                selectedRemoteIds: viewModel.selectedRemoteIds,
                 isFavorited: { item in
                     guard let remoteId = item.remoteId else { return false }
                     return favoriteRegistry.contains(remoteId)
@@ -139,7 +240,11 @@ struct ChatView: View {
                     Task { await viewModel.toggleFavorite(item) }
                 },
                 onTapMediaAttachment: { item in
-                    handleMediaTap(item)
+                    if item.message.resolvedMediaType == .composite {
+                        cardDetailMessage = item.message
+                    } else {
+                        handleMediaTap(item)
+                    }
                 },
                 onReachedTop: {
                     Task { await viewModel.loadMoreOlder() }
@@ -147,10 +252,108 @@ struct ChatView: View {
                 onScrollTargetConsumed: {
                     viewModel.didConsumeScrollTarget()
                 },
+                onPrependAnchorConsumed: {
+                    viewModel.didConsumePrependAnchor()
+                },
+                onLongPressForMultiSelect: { item in
+                    viewModel.enterMultiSelect(initial: item)
+                },
+                onToggleSelection: { item in
+                    viewModel.toggleSelection(item)
+                },
+                onDownloadMedia: { item in
+                    Task { await downloadMedia(item) }
+                },
+                onOpenExternally: { item in
+                    handleMediaTap(item) // 走预览 sheet，sheet 内的「分享」按钮会调用 UIActivityViewController
+                },
+                onForward: { item in
+                    handleForward(item)
+                },
+                onOpenCardDetail: { item in
+                    cardDetailMessage = item.message
+                },
                 scrollToken: $scrollToken
             )
         }
     }
+
+    /// D2-I3-16 多选 toolbar：顶部展示选中数 + 退出 + 删除 + 合并。
+    private var multiSelectTopBar: some View {
+        HStack {
+            Button {
+                viewModel.exitMultiSelect()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(DesignTokens.Color.textPrimary)
+            }
+            .accessibilityIdentifier("multiSelectExit")
+            Spacer()
+            Text("已选 \(viewModel.selectedRemoteIds.count)")
+                .font(DesignTokens.Typography.body)
+                .foregroundStyle(DesignTokens.Color.textPrimary)
+            Spacer()
+            HStack(spacing: 16) {
+                Button {
+                    viewModel.openMergeSheet()
+                } label: {
+                    Image(systemName: "rectangle.stack")
+                }
+                .disabled(viewModel.selectedRemoteIds.isEmpty)
+                .accessibilityIdentifier("multiSelectMerge")
+
+                Button(role: .destructive) {
+                    Task { await viewModel.deleteSelected() }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(viewModel.selectedRemoteIds.isEmpty)
+                .accessibilityIdentifier("multiSelectDelete")
+            }
+        }
+        .padding(.horizontal, DesignTokens.Spacing.medium)
+        .padding(.vertical, DesignTokens.Spacing.small)
+        .background(DesignTokens.Color.surface)
+    }
+
+    // MARK: - 长按录音手势辅助
+
+    /// 上滑超过 60pt 视为进入「取消区域」。
+    private var isInCancelArea: Bool {
+        recordingDragOffset.height < -60
+    }
+
+    private func startRecording() {
+        guard !isRecordingActive else { return }
+        Task {
+            let ok = await recordingHelper.start()
+            if ok {
+                isRecordingActive = true
+            } else if case .failed(let message) = recordingHelper.state {
+                viewModel.transientMessage = message
+                recordingHelper.reset()
+            }
+        }
+    }
+
+    private func finishRecording() {
+        guard isRecordingActive else { return }
+        let inCancel = isInCancelArea
+        if inCancel {
+            recordingHelper.cancel()
+        } else {
+            recordingHelper.stopAndKeep()
+            if case .finished(let url, _) = recordingHelper.state {
+                Task { await viewModel.sendFile(localURL: url) }
+            }
+        }
+        isRecordingActive = false
+        recordingDragOffset = .zero
+        recordingHelper.reset()
+    }
+
+    // MARK: - 媒体相关
 
     private func handleMediaTap(_ item: ChatMessageItem) {
         guard let objectName = item.message.mediaUrl, !objectName.isEmpty else { return }
@@ -166,13 +369,39 @@ struct ChatView: View {
         )
     }
 
+    /// D2-I3-15 下载到本地：调用 `FileRepository.download`，成功后 toast 提示文件位置。
+    private func downloadMedia(_ item: ChatMessageItem) async {
+        guard let objectName = item.message.mediaUrl, !objectName.isEmpty else { return }
+        do {
+            let url = try await dependencies.fileRepository.download(objectName: objectName)
+            viewModel.transientMessage = "已缓存到：\(url.lastPathComponent)"
+        } catch {
+            viewModel.transientMessage = error.localizedDescription
+        }
+    }
+
+    /// D2-I3-15 转发：当前 MVP 仅复制内容到剪贴板，提示用户去目标会话粘贴。
+    /// 未来 D2-I7 接入完整路由后，可弹出「选择会话」sheet 直接 sendText / sendImage。
+    private func handleForward(_ item: ChatMessageItem) {
+        if item.message.resolvedMediaType == .text {
+            UIPasteboard.general.string = item.message.content
+            viewModel.transientMessage = "已复制文本，可粘贴到其他会话"
+        } else {
+            // 媒体：拷贝远端 URL（resolved）到剪贴板
+            if let url = dependencies.mediaUrlResolver.resolve(item.message.mediaUrl) {
+                UIPasteboard.general.string = url.absoluteString
+                viewModel.transientMessage = "已复制媒体链接"
+            } else {
+                viewModel.transientMessage = "没有可转发的内容"
+            }
+        }
+    }
+
     private func handleFilePickerResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            // fileImporter 返回的 URL 是 security scoped；需要 startAccessing。
             let needsScope = url.startAccessingSecurityScopedResource()
-            // 立刻拷到 tmp 摆脱 scope 限制，避免上传时失败。
             let copied = copyToTemp(url: url)
             if needsScope { url.stopAccessingSecurityScopedResource() }
             guard let copied else {
@@ -241,3 +470,4 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+

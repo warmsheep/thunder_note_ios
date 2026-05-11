@@ -9,25 +9,52 @@ struct MessageBubble: View {
     let currentUserId: Int64?
     let isFavorited: Bool
     let isHighlighted: Bool
+    let isMultiSelectMode: Bool
+    let isSelected: Bool
     let mediaUrlResolver: MediaUrlResolver?
     let onCopy: () -> Void
     let onDelete: () -> Void
     let onRetry: () -> Void
     let onToggleFavorite: () -> Void
     let onTapMediaAttachment: () -> Void
+    let onLongPressForMultiSelect: () -> Void
+    let onToggleSelection: () -> Void
+    let onDownloadMedia: () -> Void
+    let onOpenExternally: () -> Void
+    let onForward: () -> Void
+    let onOpenCardDetail: () -> Void
 
     var body: some View {
-        HStack(alignment: .bottom) {
-            if isOutgoing {
-                Spacer(minLength: 48)
-                bubble
-            } else {
-                bubble
-                Spacer(minLength: 48)
+        HStack(alignment: .center, spacing: 8) {
+            if isMultiSelectMode {
+                selectionCheckbox
+            }
+            HStack(alignment: .bottom) {
+                if isOutgoing {
+                    Spacer(minLength: 48)
+                    bubble
+                } else {
+                    bubble
+                    Spacer(minLength: 48)
+                }
             }
         }
         .padding(.horizontal, DesignTokens.Spacing.medium)
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isMultiSelectMode {
+                onToggleSelection()
+            }
+        }
+    }
+
+    /// 多选模式下展示在左侧的勾选框。
+    private var selectionCheckbox: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 22))
+            .foregroundStyle(isSelected ? DesignTokens.Color.brandPrimary : DesignTokens.Color.textSecondary)
+            .accessibilityIdentifier("messageSelectCheckbox-\(item.id)")
     }
 
     private var bubble: some View {
@@ -46,34 +73,7 @@ struct MessageBubble: View {
                         )
                         .animation(.easeInOut(duration: 0.4), value: isHighlighted)
                 )
-                .contextMenu {
-                    Button {
-                        onCopy()
-                    } label: {
-                        Label("复制", systemImage: "doc.on.doc")
-                    }
-                    .accessibilityIdentifier("messageActionCopy")
-
-                    if let remoteId = item.remoteId, remoteId > 0 {
-                        Button {
-                            onToggleFavorite()
-                        } label: {
-                            if isFavorited {
-                                Label("取消收藏", systemImage: "star.slash")
-                            } else {
-                                Label("收藏", systemImage: "star")
-                            }
-                        }
-                        .accessibilityIdentifier("messageActionFavorite")
-                    }
-
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                    .accessibilityIdentifier("messageActionDelete")
-                }
+                .contextMenu { contextMenuContent }
             statusFooter
         }
         .accessibilityIdentifier("messageBubble-\(item.id)")
@@ -91,12 +91,104 @@ struct MessageBubble: View {
             videoThumbnail
         case .file:
             fileChip
-        case .audio, .composite:
+        case .composite:
+            compositeCard
+        case .audio:
             HStack(spacing: 8) {
                 Image(systemName: mediaSymbol)
                 Text(mediaPlaceholderLabel)
             }
         }
+    }
+
+    /// D2-I3-18 卡片消息渲染：展示标题 + 缩略项目数 + 点击进入详情页。
+    private var compositeCard: some View {
+        Button(action: onOpenCardDetail) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "rectangle.stack.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(isOutgoing ? Color.white : DesignTokens.Color.brandPrimary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.message.payload?.title ?? item.message.content ?? "卡片消息")
+                        .font(DesignTokens.Typography.body)
+                        .lineLimit(2)
+                    if let summary = item.message.payload?.summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(DesignTokens.Typography.caption)
+                            .lineLimit(1)
+                            .opacity(0.85)
+                    } else if let count = item.message.payload?.items?.count {
+                        Text("共 \(count) 项")
+                            .font(DesignTokens.Typography.caption)
+                            .opacity(0.85)
+                    }
+                }
+            }
+            .frame(maxWidth: 260, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("messageCompositeCard")
+    }
+
+    /// 长按菜单内容；按 mediaType 条件化展示「下载 / 外部打开」等。
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        Button {
+            onCopy()
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        .accessibilityIdentifier("messageActionCopy")
+
+        if let remoteId = item.remoteId, remoteId > 0 {
+            Button {
+                onToggleFavorite()
+            } label: {
+                if isFavorited {
+                    Label("取消收藏", systemImage: "star.slash")
+                } else {
+                    Label("收藏", systemImage: "star")
+                }
+            }
+            .accessibilityIdentifier("messageActionFavorite")
+
+            Button {
+                onForward()
+            } label: {
+                Label("转发", systemImage: "arrowshape.turn.up.right")
+            }
+            .accessibilityIdentifier("messageActionForward")
+
+            if item.message.resolvedMediaType.isMediaAttachment {
+                Button {
+                    onDownloadMedia()
+                } label: {
+                    Label("下载到本地", systemImage: "arrow.down.circle")
+                }
+                .accessibilityIdentifier("messageActionDownload")
+
+                Button {
+                    onOpenExternally()
+                } label: {
+                    Label("用其他应用打开", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityIdentifier("messageActionOpenExternally")
+            }
+
+            Button {
+                onLongPressForMultiSelect()
+            } label: {
+                Label("多选", systemImage: "checkmark.circle")
+            }
+            .accessibilityIdentifier("messageActionMultiSelect")
+        }
+
+        Button(role: .destructive) {
+            onDelete()
+        } label: {
+            Label("删除", systemImage: "trash")
+        }
+        .accessibilityIdentifier("messageActionDelete")
     }
 
     private var imageThumbnail: some View {
