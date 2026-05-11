@@ -20,7 +20,9 @@ public final class AppDependencies: ObservableObject {
     public let profileStatsViewModel: ProfileStatsViewModel
     public let database: TNDatabase
     public let syncMetaDao: SyncMetaDao
+    public let pendingMessageDao: PendingMessageDao
     public let syncRepository: SyncRepository
+    public let syncEngine: SyncEngine
     public let syncCoordinator: SyncCoordinator
     public let messageRepository: MessageRepository
     public let draftStore: DraftStore
@@ -61,6 +63,7 @@ public final class AppDependencies: ObservableObject {
             fatalError("TNDatabase 打开 / migration 失败：\(error)")
         }
         let syncMetaDao: SyncMetaDao = SQLiteSyncMetaDao(database: database)
+        let pendingMessageDao: PendingMessageDao = SQLitePendingMessageDao(database: database)
         let urlSession = URLSession(configuration: .default)
         let tokenAccessor = DefaultTokenAccessor(
             tokenStore: tokenStore,
@@ -128,17 +131,29 @@ public final class AppDependencies: ObservableObject {
         self.profileStatsViewModel = profileStatsViewModel
         self.database = database
         self.syncMetaDao = syncMetaDao
+        self.pendingMessageDao = pendingMessageDao
         let syncRepository = SyncRepositoryImpl(
             apiClient: apiClient,
             syncMetaDao: syncMetaDao,
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.syncRepository = syncRepository
+        // Step 2A：SyncEngine 接 PendingMessageDao + 占位 sender（NoopPendingMessageSender）。
+        // Step 2B 会把 sender 切到 MessageRepository / FileRepository 真实链路。
+        let syncEngine = SyncEngine(
+            dao: pendingMessageDao,
+            sender: NoopPendingMessageSender(),
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
+        self.syncEngine = syncEngine
         // pull / bootstrap 成功后顺手刷新统计 + 闪记列表（轻量），与 Android `pullAndRefreshLocal` 等价。
         // Step 2 会把 messageRepository.refreshLocalConversations 一并接进来。
         let flashNoteListViewModelRef = flashNoteListViewModel
-        self.syncCoordinator = SyncCoordinator(
+        let syncCoordinator = SyncCoordinator(
             syncRepository: syncRepository,
+            pendingMessageDao: pendingMessageDao,
+            syncEngine: syncEngine,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() },
             onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileStatsViewModel] _ in
                 if let vm = flashNoteListViewModelRef {
                     await vm.refresh()
@@ -146,6 +161,13 @@ public final class AppDependencies: ObservableObject {
                 await profileStatsViewModel?.refresh()
             }
         )
+        self.syncCoordinator = syncCoordinator
+        // 队列变化时让 SyncCoordinator 主动刷新 pendingCount 给 UI。
+        Task { [weak syncCoordinator, syncEngine] in
+            await syncEngine.setOnQueueChanged { [weak syncCoordinator] in
+                syncCoordinator?.refreshPendingCount()
+            }
+        }
         self.collectionsViewModel = CollectionsViewModel(
             collectionRepository: collectionRepository,
             flashNoteListViewModel: flashNoteListViewModel

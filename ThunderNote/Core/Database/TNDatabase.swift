@@ -33,7 +33,7 @@ public final class TNDatabase: @unchecked Sendable {
     private let filePath: String
 
     /// 当前最新 schema 版本。需要新增表 / 字段时往 `Self.migrations` 末尾追加并把这个值 +1。
-    public static let latestVersion: Int = 1
+    public static let latestVersion: Int = 2
 
     /// 当前注册的 migration 列表（按 version 严格递增）。
     public static let migrations: [Migration] = [
@@ -44,6 +44,39 @@ public final class TNDatabase: @unchecked Sendable {
                 server_time TEXT,
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             );
+        """),
+        // D2-I7-05 PendingMessage 队列。字段尽量与 Android `pending_messages` 表对齐
+        // （见 `data/model/PendingMessage.java`），新增 `username` 列做多账号隔离。
+        // status 取值与 Android `PendingMessageDispatcher.STATUS_*` 对齐：
+        // QUEUED / PROCESSING / UPLOADING / UPLOADED / SENDING / SENT / FAILED。
+        Migration(version: 2, sql: """
+            CREATE TABLE IF NOT EXISTS pending_messages (
+                local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                conversation_key INTEGER NOT NULL,
+                flash_note_id INTEGER,
+                peer_user_id INTEGER,
+                client_request_id TEXT,
+                media_type TEXT,
+                content TEXT,
+                local_file_path TEXT,
+                remote_url TEXT,
+                file_name TEXT,
+                file_size INTEGER,
+                media_duration INTEGER,
+                processed_file_path TEXT,
+                thumbnail_url TEXT,
+                payload_json TEXT,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                error_message TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                server_message_id INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_pending_messages_username_status
+                ON pending_messages(username, status);
+            CREATE INDEX IF NOT EXISTS idx_pending_messages_username_created
+                ON pending_messages(username, created_at);
         """)
     ]
 
