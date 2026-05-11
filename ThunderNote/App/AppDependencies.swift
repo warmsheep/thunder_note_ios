@@ -15,6 +15,10 @@ public final class AppDependencies: ObservableObject {
     public let flashNoteListViewModel: FlashNoteListViewModel
     public let messageRepository: MessageRepository
     public let draftStore: DraftStore
+    public let collectionRepository: CollectionRepository
+    public let contactRepository: ContactRepository
+    public let collectionsViewModel: CollectionsViewModel
+    public let contactsViewModel: ContactsViewModel
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -40,6 +44,9 @@ public final class AppDependencies: ObservableObject {
         let authRepository = AuthRepositoryImpl(apiClient: apiClient)
         let flashNoteRepository = FlashNoteRepositoryImpl(apiClient: apiClient)
         let messageRepository = MessageRepositoryImpl(apiClient: apiClient)
+        let collectionRepository = CollectionRepositoryImpl(apiClient: apiClient)
+        let contactRepository = ContactRepositoryImpl(apiClient: apiClient)
+        let flashNoteListViewModel = FlashNoteListViewModel(repository: flashNoteRepository)
 
         self.serverConfigStore = serverConfigStore
         self.tokenStore = tokenStore
@@ -48,8 +55,15 @@ public final class AppDependencies: ObservableObject {
         self.authRepository = authRepository
         self.flashNoteRepository = flashNoteRepository
         self.messageRepository = messageRepository
+        self.collectionRepository = collectionRepository
+        self.contactRepository = contactRepository
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
-        self.flashNoteListViewModel = FlashNoteListViewModel(repository: flashNoteRepository)
+        self.flashNoteListViewModel = flashNoteListViewModel
+        self.collectionsViewModel = CollectionsViewModel(
+            collectionRepository: collectionRepository,
+            flashNoteListViewModel: flashNoteListViewModel
+        )
+        self.contactsViewModel = ContactsViewModel(repository: contactRepository)
         self.draftStore = DraftStore()
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,

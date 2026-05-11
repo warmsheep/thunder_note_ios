@@ -20,15 +20,19 @@ struct MainTabView: View {
             .tag(MainTab.flashNote)
 
             CollectionsTabView()
+                .environmentObject(dependencies.collectionsViewModel)
+                .environmentObject(dependencies.flashNoteListViewModel)
                 .tabItem {
                     Label(MainTab.collections.title, systemImage: MainTab.collections.iconName)
                 }
                 .tag(MainTab.collections)
 
             ContactsTabView()
+                .environmentObject(dependencies.contactsViewModel)
                 .tabItem {
                     Label(MainTab.contacts.title, systemImage: MainTab.contacts.iconName)
                 }
+                .badge(dependencies.contactsViewModel.contactsTabBadgeCount)
                 .tag(MainTab.contacts)
 
             FavoritesTabView()
@@ -45,6 +49,10 @@ struct MainTabView: View {
         }
         .tint(DesignTokens.Color.brandPrimary)
         .accessibilityIdentifier("mainTabView")
+        .task {
+            // 启动时拉取一次未读请求计数，驱动 contact tab badge。
+            await dependencies.contactsViewModel.refreshUnreadCount()
+        }
     }
 }
 
