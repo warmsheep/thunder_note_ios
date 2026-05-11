@@ -277,6 +277,42 @@ struct ProfileTabView: View {
 
             divider16
 
+            // D2-I7-09 待同步列表入口；末尾显示 pendingCount（与顶部 badge 同源）。
+            NavigationLink {
+                PendingSyncListView(
+                    viewModel: PendingSyncListViewModel(
+                        dao: dependencies.pendingMessageDao,
+                        usernameProvider: { [weak dependencies] in
+                            dependencies?.tokenStore.loadUsername()
+                        }
+                    )
+                )
+                .environmentObject(dependencies)
+                .environmentObject(syncCoordinator)
+            } label: {
+                HStack {
+                    Label("待同步", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(DesignTokens.Color.textPrimary)
+                    Spacer()
+                    if syncCoordinator.pendingCount > 0 {
+                        Text("\(min(syncCoordinator.pendingCount, 99))")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.red))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DesignTokens.Color.textSecondary)
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+            }
+            .accessibilityIdentifier("profilePendingSyncEntry")
+
+            divider16
+
             HStack {
                 Label("服务器", systemImage: "network")
                     .foregroundStyle(DesignTokens.Color.textPrimary)
