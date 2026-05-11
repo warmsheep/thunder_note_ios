@@ -5,14 +5,27 @@ struct FlashNoteListView: View {
     let editViewModelFactory: (FlashNoteEditViewModel.Mode) -> FlashNoteEditViewModel
     let chatViewModelFactory: (ConversationKey, String, Int64?) -> ChatViewModel
 
+    @EnvironmentObject private var dependencies: AppDependencies
+    @EnvironmentObject private var shareInboxConsumer: ShareInboxConsumer
+    @EnvironmentObject private var contactsViewModel: ContactsViewModel
+
     @State private var presentedEditMode: FlashNoteEditViewModel.Mode?
     @State private var pendingDeletion: FlashNote?
     @State private var showError: Bool = false
     @State private var path: [ChatRoute] = []
+    @State private var shareInboxEntry: ShareInboxEntry?
 
     var body: some View {
         NavigationStack(path: $path) {
-            content
+            VStack(spacing: 0) {
+                ShareInboxBannerView(
+                    pendingCount: shareInboxConsumer.pendingEntries.count,
+                    onTap: {
+                        shareInboxEntry = shareInboxConsumer.pendingEntries.first
+                    }
+                )
+                content
+            }
                 .navigationTitle("闪记")
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar { toolbar }
@@ -60,6 +73,19 @@ struct FlashNoteListView: View {
                         viewModel: editViewModelFactory(mode),
                         onSaved: { note in
                             viewModel.upsertEdited(note)
+                        }
+                    )
+                }
+                .sheet(item: $shareInboxEntry) { entry in
+                    ShareTargetPickerSheet(
+                        entry: entry,
+                        flashNotes: viewModel.visibleNotes,
+                        contacts: contactsViewModel.friendContacts,
+                        onSubmitText: { key in
+                            await dependencies.submitShareEntryText(entry, key: key)
+                        },
+                        onDismiss: {
+                            shareInboxConsumer.markConsumed(entry)
                         }
                     )
                 }

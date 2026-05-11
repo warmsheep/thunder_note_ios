@@ -24,6 +24,8 @@ public final class AppDependencies: ObservableObject {
     public let favoritesViewModel: FavoritesViewModel
     public let fileRepository: FileRepository
     public let mediaUrlResolver: MediaUrlResolver
+    public let shareInboxStore: ShareInboxStore?
+    public let shareInboxConsumer: ShareInboxConsumer
 
     public init() {
         let serverConfigStore = ServerConfigStore()
@@ -86,6 +88,9 @@ public final class AppDependencies: ObservableObject {
             repository: favoriteRepository,
             registry: favoriteRegistry
         )
+        let shareStore = ShareInboxStore()
+        self.shareInboxStore = shareStore
+        self.shareInboxConsumer = ShareInboxConsumer(store: shareStore)
         self.draftStore = DraftStore()
         self.serverConfigObservable = ServerConfigStoreObservable(
             store: serverConfigStore,
@@ -128,7 +133,29 @@ public final class AppDependencies: ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("-tn.uitests.cleanState") {
             tokenStore.clear()
             serverConfigStore.useOfficial()
+            try? shareInboxStore?.clearAll()
         }
         session.bootstrap()
+        shareInboxConsumer.scan()
+    }
+
+    /// 处理 ShareInbox 里的一条 text 条目：落到对应会话（`ChatViewModel.sendText`）。
+    /// 返回发送是否成功，由 UI 层决定消费确认后的后续交互。
+    @MainActor
+    public func submitShareEntryText(_ entry: ShareInboxEntry, key: ConversationKey) async -> Bool {
+        guard entry.isText, let text = entry.text, !text.isEmpty else { return false }
+        let vm = makeChatViewModel(
+            key: key,
+            title: key.isInbox ? "收集箱" : "",
+            targetMessageId: nil
+        )
+        vm.inputText = text
+        await vm.sendText()
+        // 发送成功的判断：items 最后一条状态应为 .sent
+        let ok = vm.items.last?.status == .sent
+        if ok {
+            shareInboxConsumer.markConsumed(entry)
+        }
+        return ok
     }
 }

@@ -20,6 +20,8 @@ struct MainTabView: View {
                     )
                 }
             )
+            .environmentObject(dependencies.contactsViewModel)
+            .environmentObject(dependencies.shareInboxConsumer)
             .tabItem {
                 Label(MainTab.flashNote.title, systemImage: MainTab.flashNote.iconName)
             }
@@ -60,6 +62,10 @@ struct MainTabView: View {
         .task {
             // 启动时拉取一次未读请求计数，驱动 contact tab badge。
             await dependencies.contactsViewModel.refreshUnreadCount()
+            // 预加载联系人，方便 ShareInbox target picker 立即可用。
+            if dependencies.contactsViewModel.contacts.isEmpty {
+                await dependencies.contactsViewModel.loadContacts()
+            }
         }
     }
 }

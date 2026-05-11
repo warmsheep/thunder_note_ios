@@ -8,6 +8,7 @@ struct FavoritesTabView: View {
     @State private var path: [ChatRoute] = []
     @State private var pendingRemoval: FavoriteItem?
     @State private var toast: String? = nil
+    @State private var mediaPreviewRequest: MediaPreviewRequest?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -68,6 +69,14 @@ struct FavoritesTabView: View {
                 } message: {
                     Text(toast ?? "")
                 }
+                .sheet(item: $mediaPreviewRequest) { request in
+                    MediaPreviewView(
+                        viewModel: MediaDownloadViewModel(
+                            request: request,
+                            fileRepository: dependencies.fileRepository
+                        )
+                    )
+                }
         }
     }
 
@@ -109,6 +118,21 @@ struct FavoritesTabView: View {
     }
 
     private func handleTap(_ item: FavoriteItem) {
+        // 媒体类收藏优先走媒体预览；文本 / 复合卡片按 Android 一致走跳转到会话。
+        if let objectName = item.mediaUrl, !objectName.isEmpty,
+           item.resolvedMediaType.isMediaAttachment {
+            let kind = MediaPreviewKind.resolve(
+                mediaType: item.resolvedMediaType,
+                fileName: item.fileName
+            )
+            mediaPreviewRequest = MediaPreviewRequest(
+                kind: kind,
+                objectName: objectName,
+                title: item.fileName ?? item.displayTitle,
+                fileName: item.fileName
+            )
+            return
+        }
         guard let flashNoteId = item.flashNoteId else {
             // 「该收藏未关联闪记」与 Android 等价提示
             toast = "该收藏未关联闪记"
