@@ -10,6 +10,8 @@ public struct ChatMessageItem: Identifiable, Sendable, Equatable {
 
     public let clientRequestId: String?
     public let remoteId: Int64?
+    /// D2-I7-05 Step 2C：关联的 pending_messages 表主键。
+    public let pendingLocalId: Int64?
     public var status: Status
     public var message: Message
 

@@ -28,7 +28,7 @@ final class MessageMediaPreloaderTests: XCTestCase {
     private func makeItem(id: Int64, mediaType: String, thumb: String?, media: String?) -> ChatMessageItem {
         ChatMessageItem(
             clientRequestId: nil,
-            remoteId: id,
+            remoteId: id, pendingLocalId: nil,
             status: .sent,
             message: Message(
                 id: id,

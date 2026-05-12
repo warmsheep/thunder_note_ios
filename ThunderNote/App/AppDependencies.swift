@@ -258,6 +258,8 @@ public final class AppDependencies: ObservableObject {
                 guard let self else { return }
                 if case .authenticated = state {
                     self.syncCoordinator.bootstrapIfNeeded()
+                    // D2-I7-06 登录/回前台时，如果有未发出的消息，尝试调起调度
+                    SyncTaskManager.shared.scheduleBackgroundTasks()
                 }
             }
         session.bootstrap()
@@ -283,6 +285,8 @@ public final class AppDependencies: ObservableObject {
         try? shareInboxStore?.clearAll()
         // D2-I7：sync 状态机回 idle、bootstrap Task 释放。
         syncCoordinator.resetForSignOut()
+        // D2-I7-06/07 登出取消所有后台任务
+        SyncTaskManager.shared.cancelAll()
     }
 
     /// 处理 ShareInbox 里的一条 text 条目：落到对应会话（`ChatViewModel.sendText`）。

@@ -19,6 +19,7 @@ public protocol PendingMessageDao: Sendable {
     func clear(username: String) throws
     func findByLocalId(_ localId: Int64) throws -> PendingMessageLocal?
     func listAll(username: String) throws -> [PendingMessageLocal]
+    func listByConversation(username: String, conversationKey: Int64) throws -> [PendingMessageLocal]
     /// 取下一个可派发的条目：优先 `QUEUED`，没有再取 `FAILED`，按 createdAt 升序。
     /// 返回 nil 说明队列空。
     func pickNextDispatchable(username: String) throws -> PendingMessageLocal?
@@ -148,12 +149,18 @@ public final class SQLitePendingMessageDao: PendingMessageDao {
     public func listAll(username: String) throws -> [PendingMessageLocal] {
         try database.read { handle in
             try handle.query(
-                """
-                SELECT \(PendingMessageLocal.allColumns) FROM pending_messages
-                WHERE username = ?
-                ORDER BY created_at ASC
-                """,
+                "SELECT \(PendingMessageLocal.allColumns) FROM pending_messages WHERE username = ? ORDER BY created_at ASC",
                 bindings: [.text(username)],
+                rowMapper: Self.rowMapper
+            )
+        }
+    }
+
+    public func listByConversation(username: String, conversationKey: Int64) throws -> [PendingMessageLocal] {
+        try database.read { handle in
+            try handle.query(
+                "SELECT \(PendingMessageLocal.allColumns) FROM pending_messages WHERE username = ? AND conversation_key = ? ORDER BY created_at ASC",
+                bindings: [.text(username), .int64(conversationKey)],
                 rowMapper: Self.rowMapper
             )
         }

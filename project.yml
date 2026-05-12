@@ -57,6 +57,12 @@ targets:
         NSPhotoLibraryAddUsageDescription: 闪记需要保存图片或视频到相册
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes:
+          - fetch
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - tn.sync.recovery
+          - tn.sync.refresh
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.flashnote.ios

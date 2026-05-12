@@ -206,7 +206,9 @@ public final class MessageRepositoryImpl: MessageRepository, @unchecked Sendable
             return
         }
         try? dao.upsert(message, username: username, conversationKey: key)
-        // 不需要从这里 emit，发送方本就同步更新了 UI；避免重复重载。
+        // D2-I7-05 Step 2B：广播变动，让 ChatViewModel 通过 conversationChanged
+        // 自动 mergeLocalMessages（mergePreservingPending 会丢弃重复 sent 项）。
+        conversationsChangedSubject.send([key])
     }
 
     public func removeLocalMessages(ids: [Int64]) {

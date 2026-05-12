@@ -17,7 +17,7 @@ final class ChatViewModelFavoriteTests: XCTestCase {
         )
         let item = ChatMessageItem(
             clientRequestId: nil,
-            remoteId: 42,
+            remoteId: 42, pendingLocalId: nil,
             status: .sent,
             message: Message(id: 42, content: "x")
         )
@@ -49,7 +49,7 @@ final class ChatViewModelFavoriteTests: XCTestCase {
         )
         let item = ChatMessageItem(
             clientRequestId: nil,
-            remoteId: 42,
+            remoteId: 42, pendingLocalId: nil,
             status: .sent,
             message: Message(id: 42)
         )
@@ -74,7 +74,7 @@ final class ChatViewModelFavoriteTests: XCTestCase {
         )
         let pending = ChatMessageItem(
             clientRequestId: "abc",
-            remoteId: nil,
+            remoteId: nil, pendingLocalId: nil,
             status: .pending,
             message: Message(content: "x", clientRequestId: "abc")
         )

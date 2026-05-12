@@ -11,7 +11,7 @@ final class ChatViewModelMultiSelectTests: XCTestCase {
         let vm = makeVM(repo: repo)
         await vm.loadInitial()
 
-        let trigger = ChatMessageItem(clientRequestId: nil, remoteId: 1, status: .sent, message: m1)
+        let trigger = ChatMessageItem(clientRequestId: nil, remoteId: 1, pendingLocalId: nil, status: .sent, message: m1)
         vm.enterMultiSelect(initial: trigger)
         XCTAssertTrue(vm.isMultiSelectMode)
         XCTAssertEqual(vm.selectedRemoteIds, [1])
@@ -26,8 +26,8 @@ final class ChatViewModelMultiSelectTests: XCTestCase {
         await vm.loadInitial()
 
         vm.enterMultiSelect()
-        let i1 = ChatMessageItem(clientRequestId: nil, remoteId: 1, status: .sent, message: m1)
-        let i2 = ChatMessageItem(clientRequestId: nil, remoteId: 2, status: .sent, message: m2)
+        let i1 = ChatMessageItem(clientRequestId: nil, remoteId: 1, pendingLocalId: nil, status: .sent, message: m1)
+        let i2 = ChatMessageItem(clientRequestId: nil, remoteId: 2, pendingLocalId: nil, status: .sent, message: m2)
 
         vm.toggleSelection(i1)
         vm.toggleSelection(i2)
@@ -44,7 +44,7 @@ final class ChatViewModelMultiSelectTests: XCTestCase {
         let vm = makeVM(repo: repo)
         await vm.loadInitial()
         vm.enterMultiSelect(initial: ChatMessageItem(
-            clientRequestId: nil, remoteId: 1, status: .sent,
+            clientRequestId: nil, remoteId: 1, pendingLocalId: nil, status: .sent,
             message: Message(id: 1, content: "a", mediaType: "TEXT")
         ))
         vm.exitMultiSelect()
@@ -61,7 +61,7 @@ final class ChatViewModelMultiSelectTests: XCTestCase {
         await vm.loadInitial()
 
         vm.enterMultiSelect()
-        vm.toggleSelection(ChatMessageItem(clientRequestId: nil, remoteId: 1, status: .sent, message: m1))
+        vm.toggleSelection(ChatMessageItem(clientRequestId: nil, remoteId: 1, pendingLocalId: nil, status: .sent, message: m1))
         await vm.deleteSelected()
 
         XCTAssertEqual(repo.deleteBatchCalls, [[1]])
@@ -90,8 +90,8 @@ final class ChatViewModelMultiSelectTests: XCTestCase {
         await vm.loadInitial()
 
         vm.enterMultiSelect()
-        vm.toggleSelection(ChatMessageItem(clientRequestId: nil, remoteId: 1, status: .sent, message: m1))
-        vm.toggleSelection(ChatMessageItem(clientRequestId: nil, remoteId: 2, status: .sent, message: m2))
+        vm.toggleSelection(ChatMessageItem(clientRequestId: nil, remoteId: 1, pendingLocalId: nil, status: .sent, message: m1))
+        vm.toggleSelection(ChatMessageItem(clientRequestId: nil, remoteId: 2, pendingLocalId: nil, status: .sent, message: m2))
         await vm.mergeSelected(title: "卡片")
 
         XCTAssertEqual(repo.mergeCalls.count, 1)
@@ -111,7 +111,7 @@ final class ChatViewModelMultiSelectTests: XCTestCase {
 
         vm.enterMultiSelect()
         vm.toggleSelection(ChatMessageItem(
-            clientRequestId: nil, remoteId: 1, status: .sent,
+            clientRequestId: nil, remoteId: 1, pendingLocalId: nil, status: .sent,
             message: Message(id: 1, content: "a", mediaType: "TEXT")
         ))
         await vm.mergeSelected(title: "  ")

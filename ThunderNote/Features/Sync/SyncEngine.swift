@@ -77,6 +77,11 @@ public actor SyncEngine {
             if pending.status == .failed && pending.attemptCount >= maxAttempts {
                 break
             }
+            // 指数退避：FAILED 项重试前按 attemptCount 延迟（5s → 10s → 30s → 60s 上限）。
+            if pending.status == .failed {
+                let delay = backoffSeconds(for: pending.attemptCount)
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
             await dispatchOne(pending)
             dispatched += 1
             listener?()
@@ -87,14 +92,34 @@ public actor SyncEngine {
 
     /// 用户在待同步列表里点「重试」时调：把 attemptCount 重置为 0，状态置回 QUEUED，再 drain。
     public func retry(localId: Int64) async {
-        let found = (try? dao.findByLocalId(localId)) ?? nil
-        guard var pending = found else { return }
+        guard let username = usernameProvider(), !username.isEmpty else { return }
+        guard var pending = try? dao.findByLocalId(localId) else { return }
         pending.status = .queued
-        pending.errorMessage = nil
         pending.attemptCount = 0
+        pending.errorMessage = nil
         try? dao.update(pending)
         listener?()
         _ = await drain()
+    }
+
+    /// D2-I7-06 重置本账号下所有 FAILED 状态为 QUEUED，然后开始 drain。
+    /// （后台恢复 worker / 用户全局手动重试时使用）。
+    public func retryAll() async {
+        guard let username = usernameProvider(), !username.isEmpty else { return }
+        guard let all = try? dao.listAll(username: username) else { return }
+        var hasChanges = false
+        for mutPending in all where mutPending.status == .failed {
+            var pending = mutPending
+            pending.status = .queued
+            pending.attemptCount = 0
+            pending.errorMessage = nil
+            try? dao.update(pending)
+            hasChanges = true
+        }
+        if hasChanges {
+            listener?()
+            _ = await drain()
+        }
     }
 
     /// 用户在待同步列表里点「删除」。
@@ -110,6 +135,16 @@ public actor SyncEngine {
     }
 
     // MARK: - private
+
+    /// 指数退避时间窗（秒）。与 Android `PendingMessageDispatcher` 退避策略对齐。
+    private func backoffSeconds(for attemptCount: Int) -> UInt64 {
+        switch attemptCount {
+        case 1: return 5
+        case 2: return 10
+        case 3: return 30
+        default: return 60
+        }
+    }
 
     private func dispatchOne(_ pending: PendingMessageLocal) async {
         var current = pending

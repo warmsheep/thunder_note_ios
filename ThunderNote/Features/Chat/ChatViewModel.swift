@@ -69,17 +69,21 @@ public final class ChatViewModel: ObservableObject {
     private let session: AuthSession
     private let draftStore: DraftStore
     private let scrollAnchorStore: ChatScrollAnchorStore?
+    private let syncCoordinator: SyncCoordinator?
     private var nextPage: Int = 1
     /// `D2-I3-04` 进入会话时根据 anchorStore 读出的恢复目标，加载首页后用于定位。
     private var pendingRestoreAnchorId: Int64? = nil
     /// D2-I7-04 Step 2D-2 订阅 MessageRepository 的会话变更事件。
     private var conversationChangedCancellable: AnyCancellable?
 
+    private var pendingQueueChangedCancellable: AnyCancellable?
+
     public init(
         configuration: Configuration,
         messageRepository: MessageRepository,
         session: AuthSession,
         draftStore: DraftStore,
+        syncCoordinator: SyncCoordinator? = nil,
         favoriteRepository: FavoriteRepository? = nil,
         favoriteRegistry: FavoriteIdRegistry? = nil,
         attachmentService: AttachmentSendingService? = nil,
@@ -88,6 +92,7 @@ public final class ChatViewModel: ObservableObject {
     ) {
         self.configuration = configuration
         self.messageRepository = messageRepository
+        self.syncCoordinator = syncCoordinator
         self.favoriteRepository = favoriteRepository
         self.favoriteRegistry = favoriteRegistry
         self.attachmentService = attachmentService
@@ -170,7 +175,16 @@ public final class ChatViewModel: ObservableObject {
                 .conversationChanged(for: configuration.key)
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
-                    self?.mergeLocalMessages()
+                    self?.reloadAndMergeLocal()
+                }
+        }
+        // D2-I7-05 Step 2C 订阅待发送队列变动：当后台重试成功或失败时刷新 UI
+        if pendingQueueChangedCancellable == nil, let syncCoordinator {
+            pendingQueueChangedCancellable = syncCoordinator
+                .pendingQueueChangedPublisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.reloadAndMergeLocal()
                 }
         }
     }
@@ -237,15 +251,44 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// 收到 `conversationChanged` 事件后用本地表覆盖确认消息部分，保留 pending / failed。
-    private func mergeLocalMessages() {
+    /// 收到 `conversationChanged` 或 `pendingQueueChanged` 事件后用本地表覆盖当前状态。
+    private func reloadAndMergeLocal() {
         let local = messageRepository.listLocalMessages(
             key: configuration.key,
             limit: max(configuration.pageSize, items.count)
         )
-        guard !local.isEmpty else { return }
         let networkItems = local.map { Self.makeItem(from: $0) }
-        items = Self.mergePreservingPending(network: networkItems, current: items)
+        
+        let pending = syncCoordinator?.listPendingMessages(for: configuration.key) ?? []
+        let pendingItems = pending.map { Self.makeItem(from: $0, currentUserId: currentUserId) }
+        
+        // 这里的 networkItems 是已确认消息；pendingItems 是待发送/失败消息。
+        // 还有可能在内存里（刚调用 sendText() 还没抛异常、也没进 PendingMessage 表）的 in-memory pending 项。
+        // 我们用 `mergePreservingPending` 来把它们合并。
+        let mergedConfirmed = Self.mergePreservingPending(network: networkItems, current: items)
+        
+        // 把来自 DB 的 pendingItems 也合并进去，依据 clientRequestId 去重（内存里的新，或者 DB 里的新）
+        // 简单做法：把 DB 里的 pendingItems 追加，然后通过 clientRequestId 去除重复的内存 pending（以 DB 状态为准）
+        var finalItems = mergedConfirmed
+        for p in pendingItems {
+            if let idx = finalItems.firstIndex(where: { $0.clientRequestId == p.clientRequestId }) {
+                // 如果是已确认消息，不要覆盖（比如刚好 pull 回来确认了，但 pending 表还没来得及删）
+                if finalItems[idx].status == .sent { continue }
+                finalItems[idx] = p
+            } else {
+                finalItems.append(p)
+            }
+        }
+        
+        // 移除已经不在 pendingItems 里的、且不再内存“乐观期间”的 pending/failed 项？
+        // 只要是 DB pending 没有的，且不在 mergedConfirmed 里的（但 mergedConfirmed 保留了所有的内存项）。
+        // Wait, 如果一条消息从 pending_messages 表被删除了（比如被 SyncEngine 发送成功或被用户删除），
+        // 那么它既不在 pendingItems 也不在 networkItems（如果还没 pull 下来）。
+        // 此时我们应该怎么清理？如果发送成功，`MessageRepository.send()` 会拿到确认的 id 并 `replacePending`，
+        // 所以它已经变成了 `.sent`。如果是用户点击「重试」失败后删除，用户调了 `delete()` 会从内存删掉。
+        // 所以不强行清理不在 DB 里的 pending 项，只合并更新状态。
+        
+        items = Self.sort(finalItems)
     }
 
     /// 把网络 / 本地表的确认消息合并到当前 items，**保留** clientRequestId 未被服务端确认的
@@ -380,7 +423,7 @@ public final class ChatViewModel: ObservableObject {
 
         let clientRequestId = UUID().uuidString
         let now = ISO8601DateFormatter().string(from: Date())
-        var local = Message(
+        let local = Message(
             id: nil,
             senderId: userId,
             receiverId: receiverIdForCurrentKey(currentUserId: userId),
@@ -393,6 +436,7 @@ public final class ChatViewModel: ObservableObject {
         let pendingItem = ChatMessageItem(
             clientRequestId: clientRequestId,
             remoteId: nil,
+            pendingLocalId: nil,
             status: .pending,
             message: local
         )
@@ -404,11 +448,20 @@ public final class ChatViewModel: ObservableObject {
         do {
             let confirmed = try await messageRepository.send(local)
             replacePending(clientRequestId: clientRequestId, with: confirmed)
-        } catch let api as APIError {
-            local.id = nil
-            updatePendingFailure(clientRequestId: clientRequestId, reason: api.displayMessage)
         } catch {
-            updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+            // D2-I7-05 Step 2C: 发送失败时自动入队 PendingMessage，让乐观显示走后台重试链路
+            if let syncCoordinator {
+                _ = await syncCoordinator.enqueueText(
+                    flashNoteId: configuration.key.flashNoteIdForRequest,
+                    peerUserId: peerReceiverId(currentUserId: userId),
+                    content: trimmed,
+                    clientRequestId: clientRequestId
+                )
+                // 此时 syncCoordinator 会发通知，UI 会自动 reloadAndMergeLocal，
+                // 看到 DB 里的 queued 状态
+            } else {
+                updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+            }
         }
     }
 
@@ -505,6 +558,7 @@ public final class ChatViewModel: ObservableObject {
         let pending = ChatMessageItem(
             clientRequestId: clientRequestId,
             remoteId: nil,
+            pendingLocalId: nil,
             status: .pending,
             message: local
         )
@@ -519,8 +573,34 @@ public final class ChatViewModel: ObservableObject {
             local.mediaDuration = result.mediaDuration
             // 文本占位换成 nil（后端按 mediaType 走，content 通常空字符串即可）
             local.content = mediaType == .file ? local.content : nil
-            let confirmed = try await messageRepository.send(local)
-            replacePending(clientRequestId: clientRequestId, with: confirmed)
+            
+            do {
+                let confirmed = try await messageRepository.send(local)
+                replacePending(clientRequestId: clientRequestId, with: confirmed)
+            } catch {
+                // 上传成功但发送失败，入队 PendingMessage
+                if let syncCoordinator, case .authenticated(let user) = session.state {
+                    let pending = PendingMessageLocal(
+                        username: user.username,
+                        conversationKey: configuration.key.persistenceKey,
+                        flashNoteId: configuration.key.flashNoteIdForRequest,
+                        peerUserId: peerReceiverId(currentUserId: userId),
+                        clientRequestId: clientRequestId,
+                        mediaType: mediaType.rawValue,
+                        content: local.content,
+                        localFilePath: nil,
+                        remoteUrl: local.mediaUrl,
+                        fileName: local.fileName,
+                        fileSize: local.fileSize,
+                        mediaDuration: local.mediaDuration.map { Int64($0) },
+                        thumbnailUrl: local.thumbnailUrl,
+                        status: .queued
+                    )
+                    _ = await syncCoordinator.enqueue(pending)
+                } else {
+                    updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+                }
+            }
         } catch let api as APIError {
             updatePendingFailure(clientRequestId: clientRequestId, reason: api.displayMessage)
         } catch ChatVMError.attachmentServiceMissing {
@@ -533,18 +613,45 @@ public final class ChatViewModel: ObservableObject {
     /// 失败消息重试：保留同一个 clientRequestId 重新发送。
     public func retry(_ item: ChatMessageItem) async {
         guard case .failed = item.status else { return }
+        
+        // 如果是从 pending_messages 表来的，走 SyncCoordinator 异步重试
+        if let localId = item.pendingLocalId, let syncCoordinator {
+            await syncCoordinator.retryPending(localId: localId)
+            return
+        }
+        
         guard let clientRequestId = item.clientRequestId else { return }
-        // 标记为 pending
+        // 标记为 pending (内存项)
         if let idx = items.firstIndex(where: { $0.clientRequestId == clientRequestId }) {
             items[idx].status = .pending
         }
         do {
             let confirmed = try await messageRepository.send(item.message)
             replacePending(clientRequestId: clientRequestId, with: confirmed)
-        } catch let api as APIError {
-            updatePendingFailure(clientRequestId: clientRequestId, reason: api.displayMessage)
         } catch {
-            updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+            // 如果内存重试又失败，再次入队走 Pending 链路
+            if let syncCoordinator, case .authenticated(let user) = session.state {
+                let mediaType = item.message.mediaType ?? MessageMediaType.text.rawValue
+                let pending = PendingMessageLocal(
+                    username: user.username,
+                    conversationKey: configuration.key.persistenceKey,
+                    flashNoteId: configuration.key.flashNoteIdForRequest,
+                    peerUserId: peerReceiverId(currentUserId: currentUserId ?? 0),
+                    clientRequestId: clientRequestId,
+                    mediaType: mediaType,
+                    content: item.message.content,
+                    localFilePath: nil,
+                    remoteUrl: item.message.mediaUrl,
+                    fileName: item.message.fileName,
+                    fileSize: item.message.fileSize,
+                    mediaDuration: item.message.mediaDuration.map { Int64($0) },
+                    thumbnailUrl: item.message.thumbnailUrl,
+                    status: .queued
+                )
+                _ = await syncCoordinator.enqueue(pending)
+            } else {
+                updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+            }
         }
     }
 
@@ -563,6 +670,9 @@ public final class ChatViewModel: ObservableObject {
                 transientMessage = error.localizedDescription
             }
         } else {
+            if let localId = item.pendingLocalId, let syncCoordinator {
+                await syncCoordinator.deletePending(localId: localId)
+            }
             items.removeAll { $0.id == item.id }
         }
     }
@@ -716,6 +826,7 @@ public final class ChatViewModel: ObservableObject {
         let item = ChatMessageItem(
             clientRequestId: confirmed.clientRequestId ?? clientRequestId,
             remoteId: confirmed.id,
+            pendingLocalId: nil,
             status: .sent,
             message: confirmed
         )
@@ -738,7 +849,42 @@ public final class ChatViewModel: ObservableObject {
         ChatMessageItem(
             clientRequestId: message.clientRequestId,
             remoteId: message.id,
+            pendingLocalId: nil,
             status: .sent,
+            message: message
+        )
+    }
+
+    private static func makeItem(from pending: PendingMessageLocal, currentUserId: Int64?) -> ChatMessageItem {
+        let status: ChatMessageItem.Status = {
+            if pending.status == .failed {
+                return .failed(reason: pending.errorMessage ?? "发送失败")
+            }
+            return .pending
+        }()
+        let message = Message(
+            id: pending.serverMessageId,
+            senderId: currentUserId, // pending 都是自己发的
+            receiverId: pending.peerUserId,
+            content: pending.content,
+            readStatus: nil,
+            flashNoteId: pending.flashNoteId,
+            clientRequestId: pending.clientRequestId,
+            role: nil,
+            createdAt: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(pending.createdAt) / 1000)),
+            mediaType: pending.mediaType ?? MessageMediaType.text.rawValue,
+            mediaUrl: pending.remoteUrl ?? pending.localFilePath, // 本地文件用于预览
+            mediaDuration: pending.mediaDuration.flatMap { Int($0) },
+            thumbnailUrl: pending.thumbnailUrl,
+            fileName: pending.fileName,
+            fileSize: pending.fileSize,
+            payload: nil
+        )
+        return ChatMessageItem(
+            clientRequestId: pending.clientRequestId,
+            remoteId: pending.serverMessageId,
+            pendingLocalId: pending.localId,
+            status: status,
             message: message
         )
     }

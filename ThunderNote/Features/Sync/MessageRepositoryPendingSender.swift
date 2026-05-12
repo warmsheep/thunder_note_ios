@@ -22,6 +22,11 @@ public struct MessageRepositoryPendingSender: PendingMessageSender {
     public func send(_ pending: PendingMessageLocal) async throws -> Int64? {
         let message = try Self.message(from: pending)
         let saved = try await messageRepository.send(message)
+        // D2-I7-05 Step 2B：把已确认消息写回本地表，让 ChatViewModel
+        // 通过 conversationChanged → mergeLocalMessages 自动刷新为 sent。
+        var confirmed = message
+        confirmed.id = saved.id
+        messageRepository.upsertLocalMessage(confirmed)
         return saved.id
     }
 

@@ -23,6 +23,13 @@ public final class SyncCoordinator: ObservableObject {
     @Published public var transientMessage: String? = nil
     @Published public private(set) var lastServerTime: String? = nil
 
+    /// 队列状态发生变化（增删改）时，除了更新 `pendingCount`，还通过此 publisher 广播，
+    /// 方便聊天页刷新自己会话下的待发送消息。
+    public var pendingQueueChangedPublisher: AnyPublisher<Void, Never> {
+        pendingQueueChangedSubject.eraseToAnyPublisher()
+    }
+    private let pendingQueueChangedSubject = PassthroughSubject<Void, Never>()
+
     /// D2-I7-04 每次 pull 将本轮接收到的消息写完 `messages_local` 后，用本 subject 广播
     /// 变动的 `conversation_key` 集合。化身为 `eraseToAnyPublisher()` 给 `MessageRepository`
     /// / `ChatViewModel` 订阅，与 Android `MessageRepository.refreshLocalConversations(keys)` 等价。
@@ -62,8 +69,8 @@ public final class SyncCoordinator: ObservableObject {
     /// 让 SyncEngine 在队列变动后调本方法刷新 `pendingCount`。
     /// SyncEngine 与 Coordinator 互为弱引用，该方法可从任意线程上调。
     nonisolated public func refreshPendingCount() {
-        Task { [weak self] in
-            await self?.reloadPendingCount()
+        Task { @MainActor [weak self] in
+            self?.reloadPendingCount()
         }
     }
 
@@ -77,7 +84,24 @@ public final class SyncCoordinator: ObservableObject {
         }
     }
 
-    /// D2-I7-08 手动同步：
+    /// D2-I7-07 后台静默刷新：仅执行 pull
+    public func backgroundPull() async {
+        // 后台刷新允许重入（系统调度的我们尽量接），但如果 state==syncing 也可以忽略
+        guard state != .syncing else { return }
+        state = .syncing
+        do {
+            let response = try await syncRepository.pull()
+            lastServerTime = response.serverTime ?? lastServerTime
+            persistPulledMessages(response)
+            state = .idle
+            await onPullSucceeded(response)
+        } catch let api as APIError {
+            state = .failure(api.displayMessage)
+        } catch {
+            state = .failure(error.localizedDescription)
+        }
+        reloadPendingCount()
+    }
     /// 1. SyncEngine.drain() 消费本地 PendingMessage 队列（Step 2B 接入真实 sender 后会真正发送）
     /// 2. push 空 payload（与 Android `syncAll` 链路一致，payload 由 Step 2B 的 sender 填充）
     /// 3. pull 增量数据。
@@ -101,7 +125,7 @@ public final class SyncCoordinator: ObservableObject {
             state = .failure(error.localizedDescription)
             transientMessage = error.localizedDescription
         }
-        await reloadPendingCount()
+        reloadPendingCount()
     }
 
     /// D2-I7-05 Step 2B：把一条文本消息入队 + 触发 drain。
@@ -133,11 +157,11 @@ public final class SyncCoordinator: ObservableObject {
         )
         do {
             let id = try await engine.enqueue(pending)
-            await reloadPendingCount()
+            reloadPendingCount()
             // drain 异步执行，不让 UI 等待网络。
             Task { [weak self] in
                 _ = await engine.drain()
-                await self?.reloadPendingCount()
+                self?.reloadPendingCount()
             }
             return id
         } catch {
@@ -154,16 +178,24 @@ public final class SyncCoordinator: ObservableObject {
         guard let engine = syncEngine else { return nil }
         do {
             let id = try await engine.enqueue(pending)
-            await reloadPendingCount()
+            reloadPendingCount()
             Task { [weak self] in
                 _ = await engine.drain()
-                await self?.reloadPendingCount()
+                await MainActor.run { self?.reloadPendingCount() }
             }
             return id
         } catch {
             transientMessage = (error as? APIError)?.displayMessage ?? error.localizedDescription
             return nil
         }
+    }
+
+    /// 读取指定会话下的待发送消息，供 ChatViewModel 用来合并乐观 UI 显示（D2-I7-05 Step 2C）。
+    public func listPendingMessages(for key: ConversationKey) -> [PendingMessageLocal] {
+        guard let dao = pendingMessageDao, let username = usernameProvider(), !username.isEmpty else {
+            return []
+        }
+        return (try? dao.listByConversation(username: username, conversationKey: key.persistenceKey)) ?? []
     }
 
     /// 闪记 / 私聊会话的本地 conversationKey：直接走 `ConversationKeyResolver`
@@ -176,14 +208,21 @@ public final class SyncCoordinator: ObservableObject {
     public func retryPending(localId: Int64) async {
         guard let syncEngine else { return }
         await syncEngine.retry(localId: localId)
-        await reloadPendingCount()
+        reloadPendingCount()
+    }
+
+    /// 后台恢复 / 全局重试
+    public func retryAllPending() async {
+        guard let syncEngine else { return }
+        await syncEngine.retryAll()
+        reloadPendingCount()
     }
 
     /// 用户点击待同步列表里的「删除」。
     public func deletePending(localId: Int64) async {
         guard let syncEngine else { return }
         await syncEngine.remove(localId: localId)
-        await reloadPendingCount()
+        reloadPendingCount()
     }
 
     public func clearTransientMessage() {
@@ -235,14 +274,15 @@ public final class SyncCoordinator: ObservableObject {
     }
 
     /// 从 DAO 拉最新 pendingCount。
-    private func reloadPendingCount() async {
-        guard let dao = pendingMessageDao,
-              let username = usernameProvider(), !username.isEmpty else {
-            pendingCount = 0
-            return
+    public func reloadPendingCount() {
+        guard let dao = pendingMessageDao, let username = usernameProvider() else { return }
+        do {
+            let count = try dao.countDispatchable(username: username)
+            pendingCount = count
+            pendingQueueChangedSubject.send()
+        } catch {
+            // ignore
         }
-        let next = (try? dao.countDispatchable(username: username)) ?? 0
-        if pendingCount != next { pendingCount = next }
     }
 
     private func runBootstrap() async {
@@ -260,6 +300,6 @@ public final class SyncCoordinator: ObservableObject {
             state = .failure(error.localizedDescription)
             transientMessage = error.localizedDescription
         }
-        await reloadPendingCount()
+        reloadPendingCount()
     }
 }
