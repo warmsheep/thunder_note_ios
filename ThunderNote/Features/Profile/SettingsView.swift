@@ -19,9 +19,9 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("settingsChangePassword")
                 NavigationLink {
-                    PlaceholderSettingsView(title: "手势锁", subtitle: "D2-I6-16~20 待落地")
+                    GestureLockSettingsView()
                 } label: {
-                    Label("手势锁", systemImage: "lock.shield")
+                    Label("手势锁", systemImage: "hand.draw")
                 }
                 .accessibilityIdentifier("settingsGestureLock")
             }

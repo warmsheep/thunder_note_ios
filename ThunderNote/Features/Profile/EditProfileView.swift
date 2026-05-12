@@ -60,7 +60,7 @@ struct EditProfileView: View {
         .confirmationDialog("更换头像", isPresented: $showAvatarMenu, titleVisibility: .visible) {
             Button("从相册选择") {
                 photoPickerHelper.reset()
-                showPhotosPicker = true
+                GestureLockBypass.register(); showPhotosPicker = true
             }
             Button("选择 emoji") {
                 showEmojiPicker = true

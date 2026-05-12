@@ -181,12 +181,12 @@ struct ChatView: View {
             onSend: {
                 Task { await viewModel.sendText() }
             },
-            onPickImage: { presentImagePicker = true },
-            onPickVideo: { presentVideoPicker = true },
-            onPickFile: { presentFilePicker = true },
+            onPickImage: { GestureLockBypass.register(); presentImagePicker = true },
+            onPickVideo: { GestureLockBypass.register(); presentVideoPicker = true },
+            onPickFile: { GestureLockBypass.register(); presentFilePicker = true },
             onPickCamera: {
                 if CameraCaptureView.isAvailable {
-                    presentCameraCapture = true
+                    GestureLockBypass.register(); presentCameraCapture = true
                 } else {
                     viewModel.transientMessage = "当前设备不支持相机"
                 }

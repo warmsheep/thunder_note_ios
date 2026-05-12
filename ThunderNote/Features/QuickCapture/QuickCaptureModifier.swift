@@ -33,20 +33,20 @@ struct QuickCaptureModifier: ViewModifier {
                 }
                 .accessibilityIdentifier("quickCaptureMenuText")
                 Button("图片") {
-                    presentImagePicker = true
+                    GestureLockBypass.register(); presentImagePicker = true
                 }
                 .accessibilityIdentifier("quickCaptureMenuImage")
                 Button("视频") {
-                    presentVideoPicker = true
+                    GestureLockBypass.register(); presentVideoPicker = true
                 }
                 .accessibilityIdentifier("quickCaptureMenuVideo")
                 Button("文件") {
-                    presentFilePicker = true
+                    GestureLockBypass.register(); presentFilePicker = true
                 }
                 .accessibilityIdentifier("quickCaptureMenuFile")
                 Button("拍照") {
                     if CameraCaptureView.isAvailable {
-                        presentCamera = true
+                        GestureLockBypass.register(); presentCamera = true
                     } else {
                         flashNoteListViewModel.transientMessage = "当前设备不支持相机"
                     }

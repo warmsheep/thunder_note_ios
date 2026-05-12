@@ -173,9 +173,9 @@ struct CardEditorView: View {
                     .foregroundStyle(DesignTokens.Color.textSecondary)
                 Spacer()
                 Menu {
-                    Button("从相册选图片") { presentImagePicker = true }
-                    Button("从相册选视频") { presentVideoPicker = true }
-                    Button("选择文件") { presentFilePicker = true }
+                    Button("从相册选图片") { GestureLockBypass.register(); presentImagePicker = true }
+                    Button("从相册选视频") { GestureLockBypass.register(); presentVideoPicker = true }
+                    Button("选择文件") { GestureLockBypass.register(); presentFilePicker = true }
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 22))

@@ -18,6 +18,7 @@ public final class AppDependencies: ObservableObject {
     public let userRepository: UserRepository
     public let profileViewModel: ProfileViewModel
     public let profileStatsViewModel: ProfileStatsViewModel
+    public let gestureLockStore: GestureLockStoring
     public let database: TNDatabase
     public let syncMetaDao: SyncMetaDao
     public let pendingMessageDao: PendingMessageDao
@@ -120,6 +121,10 @@ public final class AppDependencies: ObservableObject {
         self.favoriteRegistry = favoriteRegistry
         self.fileRepository = fileRepository
         self.mediaUrlResolver = mediaUrlResolver
+        
+        let gestureLockStore = KeychainGestureLockStore()
+        self.gestureLockStore = gestureLockStore
+
         self.authViewModel = AuthViewModel(authRepository: authRepository, session: session)
         self.flashNoteListViewModel = flashNoteListViewModel
         self.flashNoteSearchViewModel = FlashNoteSearchViewModel(repository: flashNoteRepository)
@@ -287,6 +292,8 @@ public final class AppDependencies: ObservableObject {
         syncCoordinator.resetForSignOut()
         // D2-I7-06/07 登出取消所有后台任务
         SyncTaskManager.shared.cancelAll()
+        // D2-I6-12 清理当前会话 DebugLog
+        DebugLog.shared.clearCurrentSession()
     }
 
     /// 处理 ShareInbox 里的一条 text 条目：落到对应会话（`ChatViewModel.sendText`）。

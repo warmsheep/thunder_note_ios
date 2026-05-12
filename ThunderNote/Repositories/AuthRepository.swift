@@ -5,6 +5,11 @@ public protocol AuthRepository: Sendable {
     func register(username: String, email: String, password: String) async throws
     func logout() async throws
     func changePassword(currentPassword: String, newPassword: String) async throws
+    
+    // D2-I6-19 手势锁云端备份
+    func updateGestureLock(passwordHash: String) async throws
+    func clearGestureLock() async throws
+    func getGestureLock() async throws -> GestureLockBackupResponse
 }
 
 public final class AuthRepositoryImpl: AuthRepository, @unchecked Sendable {
@@ -77,7 +82,25 @@ public final class AuthRepositoryImpl: AuthRepository, @unchecked Sendable {
         _ = try await apiClient.send(endpoint)
     }
 
-    // MARK: - Validation (与 Android 校验规则对齐)
+    // MARK: - Gesture Lock (D2-I6-19)
+
+    public func updateGestureLock(passwordHash: String) async throws {
+        let request = GestureLockBackupRequest(passwordHash: passwordHash)
+        let endpoint = try Endpoint<EmptyResponse>.json(.put, "/api/auth/gesture-lock", body: request)
+        _ = try await apiClient.send(endpoint)
+    }
+
+    public func clearGestureLock() async throws {
+        let endpoint = Endpoint<EmptyResponse>(method: .delete, path: "/api/auth/gesture-lock")
+        _ = try await apiClient.send(endpoint)
+    }
+
+    public func getGestureLock() async throws -> GestureLockBackupResponse {
+        let endpoint = Endpoint<GestureLockBackupResponse>(method: .get, path: "/api/auth/gesture-lock")
+        return try await apiClient.send(endpoint)
+    }
+
+    // MARK: - Local Validation (与 Android 校验规则对齐)
 
     static func validateUsername(_ username: String) throws {
         let count = username.count

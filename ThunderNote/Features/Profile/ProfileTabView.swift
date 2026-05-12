@@ -327,6 +327,15 @@ struct ProfileTabView: View {
 
             divider16
 
+            NavigationLink {
+                DebugLogView()
+            } label: {
+                listRow(systemImage: "terminal", title: "调试日志")
+            }
+            .accessibilityIdentifier("profileDebugLogEntry")
+
+            divider16
+
             Button(role: .destructive) {
                 Task { await authViewModel.logout() }
             } label: {

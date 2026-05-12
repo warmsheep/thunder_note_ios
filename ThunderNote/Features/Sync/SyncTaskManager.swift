@@ -16,10 +16,8 @@ public final class SyncTaskManager: Sendable {
 
     private init() {}
 
-    /// 在 `AppDelegate.application(_:didFinishLaunchingWithOptions:)` 中调用
-    public func register(syncCoordinator: SyncCoordinator) {
-        self.syncCoordinator = syncCoordinator
-
+    /// 在 App.init() 中调用（必须在 main 返回前完成）
+    public func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: recoveryTaskIdentifier, using: nil) { task in
             guard let processingTask = task as? BGProcessingTask else { return }
             self.handleRecovery(task: processingTask)
@@ -29,6 +27,11 @@ public final class SyncTaskManager: Sendable {
             guard let refreshTask = task as? BGAppRefreshTask else { return }
             self.handleRefresh(task: refreshTask)
         }
+    }
+
+    /// 在启动完毕后注入 coordinator
+    public func setCoordinator(_ coordinator: SyncCoordinator) {
+        self.syncCoordinator = coordinator
     }
 
     /// App 进入后台时调度
