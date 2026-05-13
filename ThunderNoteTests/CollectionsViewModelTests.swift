@@ -45,6 +45,28 @@ final class CollectionsViewModelTests: XCTestCase {
         XCTAssertNotNil(created)
         XCTAssertEqual(vm.collections.map { $0.name }, ["A", "Z"], "按名称排序")
     }
+
+    @MainActor
+    func test_applySyncSnapshot_updatesCollectionsAndRecomputesGroups() async {
+        let flashRepo = StubFlashNoteRepository(notes: [
+            FlashNote(id: -1, pinned: true, inbox: true),
+            FlashNote(id: 10, title: "周报", tags: "工作")
+        ])
+        let flashVM = FlashNoteListViewModel(repository: flashRepo)
+        await flashVM.load()
+
+        let vm = CollectionsViewModel(
+            collectionRepository: StubCollectionRepository(collections: []),
+            flashNoteListViewModel: flashVM
+        )
+
+        vm.applySyncSnapshot(collections: [Collection(id: 1, name: "工作")])
+
+        XCTAssertEqual(vm.collections.map(\.name), ["工作"])
+        XCTAssertEqual(vm.groups.count, 2)
+        XCTAssertEqual(vm.groups.first?.displayName, "工作")
+        XCTAssertEqual(vm.groups.first?.notes.map(\.id), [10])
+    }
 }
 
 // MARK: - Stubs

@@ -49,6 +49,21 @@ final class FavoritesViewModelTests: XCTestCase {
         XCTAssertEqual(repo.unfavoriteIds, [])
         XCTAssertNotNil(vm.transientMessage)
     }
+
+    @MainActor
+    func test_applySyncSnapshot_replacesItemsAndRegistry() {
+        let repo = StubFavoriteRepository(items: [FavoriteItem(id: 1, messageId: 10)])
+        let registry = FavoriteIdRegistry()
+        let vm = FavoritesViewModel(repository: repo, registry: registry)
+
+        vm.applySyncSnapshot([
+            FavoriteItem(id: 2, messageId: 22, favoritedAt: "2026-05-13T11:00:00"),
+            FavoriteItem(id: 3, messageId: 21, favoritedAt: "2026-05-13T10:00:00")
+        ])
+
+        XCTAssertEqual(vm.items.map(\.id), [2, 3])
+        XCTAssertEqual(registry.favoritedMessageIds, Set([21, 22]))
+    }
 }
 
 private final class StubFavoriteRepository: FavoriteRepository, @unchecked Sendable {

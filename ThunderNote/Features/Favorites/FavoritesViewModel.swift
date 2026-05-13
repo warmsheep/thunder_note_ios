@@ -43,6 +43,17 @@ public final class FavoritesViewModel: ObservableObject {
         await load()
     }
 
+    /// D2-I7：sync bootstrap / pull 返回 favorites 快照时，直接替换列表与 registry。
+    public func applySyncSnapshot(_ favorites: [FavoriteItem]) {
+        items = favorites.sorted { lhs, rhs in
+            (lhs.favoritedAt ?? "") > (rhs.favoritedAt ?? "")
+        }
+        registry.replaceAll(items.compactMap { $0.messageId })
+        if case .loading = state {
+            state = .loaded
+        }
+    }
+
     public func remove(_ favorite: FavoriteItem) async {
         guard let messageId = favorite.messageId else {
             transientMessage = "缺少消息 ID，无法取消收藏"

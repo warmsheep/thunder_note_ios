@@ -63,6 +63,17 @@ public final class CollectionsViewModel: ObservableObject {
         await load()
     }
 
+    /// D2-I7：sync bootstrap / pull 返回 collections 快照时，直接更新本地合集与分组。
+    public func applySyncSnapshot(collections: [Collection]) {
+        self.collections = collections.sorted { lhs, rhs in
+            lhs.displayName < rhs.displayName
+        }
+        recomputeGroups()
+        if case .loading = state {
+            state = .loaded
+        }
+    }
+
     public func recomputeGroups() {
         var byTag: [String: [FlashNote]] = [:]
         var uncategorized: [FlashNote] = []
