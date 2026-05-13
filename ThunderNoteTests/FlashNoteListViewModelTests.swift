@@ -226,6 +226,23 @@ final class FlashNoteListViewModelTests: XCTestCase {
         XCTAssertEqual(vm.notes.first?.id, -1, "收集箱仍在最前")
         XCTAssertEqual(vm.notes.dropFirst().first?.id, 99, "新建项排在更新时间最近的位置")
     }
+
+    @MainActor
+    func test_applySyncSnapshot_overridesLoadedNotesAndResorts() async {
+        let repo = StubFlashNoteRepository(notes: [
+            FlashNote(id: 1, title: "旧", updatedAt: "2026-01-01T00:00:00")
+        ])
+        let vm = FlashNoteListViewModel(repository: repo)
+        await vm.load()
+
+        vm.applySyncSnapshot([
+            FlashNote(id: 7, title: "普通", updatedAt: "2026-05-13T10:00:00"),
+            FlashNote(id: -1, title: "收集箱", pinned: true, inbox: true),
+        ])
+
+        XCTAssertEqual(vm.notes.map(\.id), [-1, 7])
+        XCTAssertEqual(vm.state, .loaded)
+    }
 }
 
 // MARK: - Stub Repository

@@ -174,6 +174,15 @@ public final class FlashNoteListViewModel: ObservableObject {
         upsertCreated(note)
     }
 
+    /// D2-I7：sync bootstrap / pull 直接返回 notes 快照时，立即替换当前列表状态。
+    /// 不触发额外网络刷新，避免刚 sync 完又重复 list 一次。
+    public func applySyncSnapshot(_ notes: [FlashNote]) {
+        self.notes = Self.sort(notes)
+        if case .loading = state {
+            state = .loaded
+        }
+    }
+
     public func clearTransientMessage() {
         transientMessage = nil
     }
