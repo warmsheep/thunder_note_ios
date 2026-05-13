@@ -68,7 +68,7 @@ public final class DebugLog: ObservableObject {
         fileManager.createFile(atPath: currentLogURL.path, contents: nil)
         fileHandle = try? FileHandle(forWritingTo: currentLogURL)
         
-        DebugLog.info(tag: "DebugLog", message: "Log system initialized.")
+        self.log(level: .info, tag: "DebugLog", message: "Log system initialized.")
     }
 
     public static func info(tag: String, message: String) {
