@@ -44,6 +44,12 @@ public final class ProfileViewModel: ObservableObject {
         self.profile = profile
     }
 
+    /// D2-I7：bootstrap / pull 返回 profile 快照后，直接应用到当前 UI 状态。
+    /// 这里只做本地状态注入，不额外发起网络请求。
+    public func applySyncSnapshot(_ profile: UserProfile) {
+        self.profile = profile
+    }
+
     /// D2-I6-04 头像图片裁剪后上传：写临时文件 → `FileRepository.upload` → `updateAvatar(objectName)`。
     /// 失败 transient + 本地 avatar 不变；本地 `Caches/avatar.jpg` 也会被刷新。
     public func updateAvatarFromImageData(_ data: Data) async {

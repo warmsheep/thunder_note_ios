@@ -101,6 +101,18 @@ final class ProfileViewModelTests: XCTestCase {
         XCTAssertEqual(vm.profile?.avatar, "💼", "上传失败时不应改动 avatar")
         XCTAssertNotNil(vm.transientMessage)
     }
+
+    @MainActor
+    func test_applySyncSnapshot_updatesProfileWithoutFetch() {
+        let repo = StubUserRepository(cached: UserProfile(nickname: "Old"))
+        let vm = ProfileViewModel(repository: repo)
+
+        vm.applySyncSnapshot(UserProfile(bio: "from sync", nickname: "Synced"))
+
+        XCTAssertEqual(vm.profile?.nickname, "Synced")
+        XCTAssertEqual(vm.profile?.bio, "from sync")
+        XCTAssertEqual(repo.fetchCalls.count, 0)
+    }
 }
 
 /// 头像专用的最小 FileRepository stub。
