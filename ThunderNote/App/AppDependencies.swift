@@ -23,6 +23,9 @@ public final class AppDependencies: ObservableObject {
     public let syncMetaDao: SyncMetaDao
     public let pendingMessageDao: PendingMessageDao
     public let messageLocalDao: MessageLocalDao
+    public let flashNoteLocalDao: FlashNoteLocalDao
+    public let collectionLocalDao: CollectionLocalDao
+    public let favoriteLocalDao: FavoriteLocalDao
     public let syncRepository: SyncRepository
     public let syncEngine: SyncEngine
     public let syncCoordinator: SyncCoordinator
@@ -67,6 +70,9 @@ public final class AppDependencies: ObservableObject {
         let syncMetaDao: SyncMetaDao = SQLiteSyncMetaDao(database: database)
         let pendingMessageDao: PendingMessageDao = SQLitePendingMessageDao(database: database)
         let messageLocalDao: MessageLocalDao = SQLiteMessageLocalDao(database: database)
+        let flashNoteLocalDao: FlashNoteLocalDao = SQLiteFlashNoteLocalDao(database: database)
+        let collectionLocalDao: CollectionLocalDao = SQLiteCollectionLocalDao(database: database)
+        let favoriteLocalDao: FavoriteLocalDao = SQLiteFavoriteLocalDao(database: database)
         let urlSession = URLSession(configuration: .default)
         let tokenAccessor = DefaultTokenAccessor(
             tokenStore: tokenStore,
@@ -85,16 +91,28 @@ public final class AppDependencies: ObservableObject {
             tokenAccessor: tokenAccessor
         )
         let authRepository = AuthRepositoryImpl(apiClient: apiClient)
-        let flashNoteRepository = FlashNoteRepositoryImpl(apiClient: apiClient)
+        let flashNoteRepository = FlashNoteRepositoryImpl(
+            apiClient: apiClient,
+            localDao: flashNoteLocalDao,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
         let messageRepository = MessageRepositoryImpl(
             apiClient: apiClient,
             messageLocalDao: messageLocalDao,
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() },
             currentUserIdProvider: { [weak tokenStore] in tokenStore?.loadUserId() }
         )
-        let collectionRepository = CollectionRepositoryImpl(apiClient: apiClient)
+        let collectionRepository = CollectionRepositoryImpl(
+            apiClient: apiClient,
+            localDao: collectionLocalDao,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
         let contactRepository = ContactRepositoryImpl(apiClient: apiClient)
-        let favoriteRepository = FavoriteRepositoryImpl(apiClient: apiClient)
+        let favoriteRepository = FavoriteRepositoryImpl(
+            apiClient: apiClient,
+            localDao: favoriteLocalDao,
+            usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
+        )
         let favoriteRegistry = FavoriteIdRegistry()
         let mediaUrlResolver = MediaUrlResolver(serverConfigStore: serverConfigStore)
         let fileRepository = FileRepositoryImpl(
@@ -156,6 +174,9 @@ public final class AppDependencies: ObservableObject {
         self.syncMetaDao = syncMetaDao
         self.pendingMessageDao = pendingMessageDao
         self.messageLocalDao = messageLocalDao
+        self.flashNoteLocalDao = flashNoteLocalDao
+        self.collectionLocalDao = collectionLocalDao
+        self.favoriteLocalDao = favoriteLocalDao
         let syncRepository = SyncRepositoryImpl(
             apiClient: apiClient,
             syncMetaDao: syncMetaDao,
@@ -179,7 +200,19 @@ public final class AppDependencies: ObservableObject {
             syncEngine: syncEngine,
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() },
             currentUserIdProvider: { [weak tokenStore] in tokenStore?.loadUserId() },
-            onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileViewModel, weak collectionsViewModel, weak favoritesViewModel, weak profileStatsViewModel] response in
+            onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileViewModel, weak collectionsViewModel, weak favoritesViewModel, weak profileStatsViewModel, flashNoteLocalDao, collectionLocalDao, favoriteLocalDao, weak tokenStore] response in
+                let username = tokenStore?.loadUsername()
+                if let username, !username.isEmpty {
+                    if !response.notes.isEmpty {
+                        try? flashNoteLocalDao.replaceAll(response.notes, username: username)
+                    }
+                    if !response.collections.isEmpty {
+                        try? collectionLocalDao.replaceAll(response.collections, username: username)
+                    }
+                    if !response.favorites.isEmpty {
+                        try? favoriteLocalDao.replaceAll(response.favorites, username: username)
+                    }
+                }
                 if let profile = response.profile {
                     await profileViewModel?.applySyncSnapshot(profile)
                 }

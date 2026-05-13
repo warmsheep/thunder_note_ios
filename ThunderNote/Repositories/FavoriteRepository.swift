@@ -9,12 +9,25 @@ public protocol FavoriteRepository: Sendable {
 
 public final class FavoriteRepositoryImpl: FavoriteRepository, @unchecked Sendable {
     private let apiClient: APIClient
+    private let localDao: FavoriteLocalDao?
+    private let usernameProvider: @Sendable () -> String?
 
-    public init(apiClient: APIClient) {
+    public init(
+        apiClient: APIClient,
+        localDao: FavoriteLocalDao? = nil,
+        usernameProvider: @Sendable @escaping () -> String? = { nil }
+    ) {
         self.apiClient = apiClient
+        self.localDao = localDao
+        self.usernameProvider = usernameProvider
     }
 
     public func list() async throws -> [FavoriteItem] {
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            if let local = try? dao.listAll(username: username), !local.isEmpty {
+                return local
+            }
+        }
         let endpoint = Endpoint<[FavoriteItem]>(
             method: .post,
             path: "/api/favorites/list",
@@ -22,7 +35,11 @@ public final class FavoriteRepositoryImpl: FavoriteRepository, @unchecked Sendab
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let favorites = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty, !favorites.isEmpty {
+            try? dao.replaceAll(favorites, username: username)
+        }
+        return favorites
     }
 
     public func favorite(messageId: Int64) async throws -> FavoriteItem {
@@ -32,7 +49,11 @@ public final class FavoriteRepositoryImpl: FavoriteRepository, @unchecked Sendab
             body: nil,
             requiresAuth: true
         )
-        return try await apiClient.send(endpoint)
+        let result = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.upsert(result, username: username)
+        }
+        return result
     }
 
     public func unfavorite(messageId: Int64) async throws {
@@ -43,5 +64,8 @@ public final class FavoriteRepositoryImpl: FavoriteRepository, @unchecked Sendab
             requiresAuth: true
         )
         _ = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.deleteByMessageId(username: username, messageId: messageId)
+        }
     }
 }

@@ -13,12 +13,25 @@ public enum CollectionRepositoryError: Error, Equatable {
 
 public final class CollectionRepositoryImpl: CollectionRepository, @unchecked Sendable {
     private let apiClient: APIClient
+    private let localDao: CollectionLocalDao?
+    private let usernameProvider: @Sendable () -> String?
 
-    public init(apiClient: APIClient) {
+    public init(
+        apiClient: APIClient,
+        localDao: CollectionLocalDao? = nil,
+        usernameProvider: @Sendable @escaping () -> String? = { nil }
+    ) {
         self.apiClient = apiClient
+        self.localDao = localDao
+        self.usernameProvider = usernameProvider
     }
 
     public func list() async throws -> [Collection] {
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            if let local = try? dao.listAll(username: username), !local.isEmpty {
+                return local
+            }
+        }
         let endpoint = Endpoint<[Collection]>(
             method: .post,
             path: "/api/collections/list",
@@ -26,7 +39,11 @@ public final class CollectionRepositoryImpl: CollectionRepository, @unchecked Se
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let collections = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty, !collections.isEmpty {
+            try? dao.replaceAll(collections, username: username)
+        }
+        return collections
     }
 
     public func create(name: String) async throws -> Collection {
@@ -41,7 +58,11 @@ public final class CollectionRepositoryImpl: CollectionRepository, @unchecked Se
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let result = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.upsert(result, username: username)
+        }
+        return result
     }
 
     public func update(id: Int64, name: String) async throws -> Collection {
@@ -56,7 +77,11 @@ public final class CollectionRepositoryImpl: CollectionRepository, @unchecked Se
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let result = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.upsert(result, username: username)
+        }
+        return result
     }
 
     public func delete(id: Int64) async throws {
@@ -67,5 +92,8 @@ public final class CollectionRepositoryImpl: CollectionRepository, @unchecked Se
             requiresAuth: true
         )
         _ = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.delete(username: username, id: id)
+        }
     }
 }

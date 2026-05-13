@@ -33,7 +33,7 @@ public final class TNDatabase: @unchecked Sendable {
     private let filePath: String
 
     /// 当前最新 schema 版本。需要新增表 / 字段时往 `Self.migrations` 末尾追加并把这个值 +1。
-    public static let latestVersion: Int = 3
+    public static let latestVersion: Int = 6
 
     /// 当前注册的 migration 列表（按 version 严格递增）。
     public static let migrations: [Migration] = [
@@ -107,6 +107,66 @@ public final class TNDatabase: @unchecked Sendable {
                 ON messages_local(username, conversation_key, created_at);
             CREATE INDEX IF NOT EXISTS idx_messages_local_username_client_req
                 ON messages_local(username, client_request_id);
+        """),
+        Migration(version: 4, sql: """
+            CREATE TABLE IF NOT EXISTS flash_notes_local (
+                username TEXT NOT NULL,
+                id INTEGER NOT NULL,
+                user_id INTEGER,
+                title TEXT,
+                icon TEXT,
+                content TEXT,
+                latest_message TEXT,
+                tags TEXT,
+                deleted INTEGER,
+                pinned INTEGER,
+                hidden INTEGER,
+                inbox INTEGER,
+                created_at TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (username, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_flash_notes_local_username_updated
+                ON flash_notes_local(username, updated_at);
+        """),
+        Migration(version: 5, sql: """
+            CREATE TABLE IF NOT EXISTS collections_local (
+                username TEXT NOT NULL,
+                id INTEGER NOT NULL,
+                user_id INTEGER,
+                name TEXT,
+                description TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (username, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_collections_local_username_updated
+                ON collections_local(username, updated_at);
+        """),
+        Migration(version: 6, sql: """
+            CREATE TABLE IF NOT EXISTS favorites_local (
+                username TEXT NOT NULL,
+                id INTEGER NOT NULL,
+                message_id INTEGER,
+                flash_note_id INTEGER,
+                flash_note_title TEXT,
+                flash_note_icon TEXT,
+                role TEXT,
+                content TEXT,
+                media_type TEXT,
+                media_url TEXT,
+                file_name TEXT,
+                file_size INTEGER,
+                media_duration INTEGER,
+                favorited_at TEXT,
+                message_created_at TEXT,
+                payload_json TEXT,
+                PRIMARY KEY (username, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_favorites_local_username_favorited
+                ON favorites_local(username, favorited_at);
+            CREATE INDEX IF NOT EXISTS idx_favorites_local_username_message
+                ON favorites_local(username, message_id);
         """)
     ]
 

@@ -32,12 +32,25 @@ public enum FlashNoteRepositoryError: Error, Equatable {
 
 public final class FlashNoteRepositoryImpl: FlashNoteRepository, @unchecked Sendable {
     private let apiClient: APIClient
+    private let localDao: FlashNoteLocalDao?
+    private let usernameProvider: @Sendable () -> String?
 
-    public init(apiClient: APIClient) {
+    public init(
+        apiClient: APIClient,
+        localDao: FlashNoteLocalDao? = nil,
+        usernameProvider: @Sendable @escaping () -> String? = { nil }
+    ) {
         self.apiClient = apiClient
+        self.localDao = localDao
+        self.usernameProvider = usernameProvider
     }
 
     public func list() async throws -> [FlashNote] {
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            if let local = try? dao.listAll(username: username), !local.isEmpty {
+                return local
+            }
+        }
         let endpoint = Endpoint<[FlashNote]>(
             method: .post,
             path: "/api/flash-notes/list",
@@ -45,7 +58,11 @@ public final class FlashNoteRepositoryImpl: FlashNoteRepository, @unchecked Send
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let notes = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty, !notes.isEmpty {
+            try? dao.replaceAll(notes, username: username)
+        }
+        return notes
     }
 
     public func create(title: String, icon: String?, tags: String?) async throws -> FlashNote {
@@ -65,7 +82,11 @@ public final class FlashNoteRepositoryImpl: FlashNoteRepository, @unchecked Send
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let result = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.upsert(result, username: username)
+        }
+        return result
     }
 
     public func update(id: Int64, title: String, icon: String?, tags: String?) async throws -> FlashNote {
@@ -86,7 +107,11 @@ public final class FlashNoteRepositoryImpl: FlashNoteRepository, @unchecked Send
             requiresAuth: true,
             headers: ["Content-Type": "application/json; charset=utf-8"]
         )
-        return try await apiClient.send(endpoint)
+        let result = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.upsert(result, username: username)
+        }
+        return result
     }
 
     public func setPinned(id: Int64, value: Bool) async throws {
@@ -124,6 +149,9 @@ public final class FlashNoteRepositoryImpl: FlashNoteRepository, @unchecked Send
             requiresAuth: true
         )
         _ = try await apiClient.send(endpoint)
+        if let dao = localDao, let username = usernameProvider(), !username.isEmpty {
+            try? dao.delete(username: username, id: id)
+        }
     }
 
     public func search(query: String) async throws -> FlashNoteSearchResponse {
