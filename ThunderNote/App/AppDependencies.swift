@@ -133,7 +133,8 @@ public final class AppDependencies: ObservableObject {
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.userRepository = userRepository
-        self.profileViewModel = ProfileViewModel(repository: userRepository, fileRepository: fileRepository)
+        let profileViewModel = ProfileViewModel(repository: userRepository, fileRepository: fileRepository)
+        self.profileViewModel = profileViewModel
         let profileStatsViewModel = ProfileStatsViewModel(
             flashNoteRepository: flashNoteRepository,
             favoriteRepository: favoriteRepository,
@@ -141,6 +142,16 @@ public final class AppDependencies: ObservableObject {
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.profileStatsViewModel = profileStatsViewModel
+        let collectionsViewModel = CollectionsViewModel(
+            collectionRepository: collectionRepository,
+            flashNoteListViewModel: flashNoteListViewModel
+        )
+        self.collectionsViewModel = collectionsViewModel
+        let favoritesViewModel = FavoritesViewModel(
+            repository: favoriteRepository,
+            registry: favoriteRegistry
+        )
+        self.favoritesViewModel = favoritesViewModel
         self.database = database
         self.syncMetaDao = syncMetaDao
         self.pendingMessageDao = pendingMessageDao
@@ -159,8 +170,7 @@ public final class AppDependencies: ObservableObject {
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() }
         )
         self.syncEngine = syncEngine
-        // pull / bootstrap 成功后顺手刷新统计 + 闪记列表（轻量），与 Android `pullAndRefreshLocal` 等价。
-        // Step 2 会把 messageRepository.refreshLocalConversations 一并接进来。
+        // pull / bootstrap 成功后先应用 sync 快照到当前 UI 状态；messages 继续走本地表 + 会话广播。
         let flashNoteListViewModelRef = flashNoteListViewModel
         let syncCoordinator = SyncCoordinator(
             syncRepository: syncRepository,
@@ -169,9 +179,18 @@ public final class AppDependencies: ObservableObject {
             syncEngine: syncEngine,
             usernameProvider: { [weak tokenStore] in tokenStore?.loadUsername() },
             currentUserIdProvider: { [weak tokenStore] in tokenStore?.loadUserId() },
-            onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileStatsViewModel] _ in
-                if let vm = flashNoteListViewModelRef {
-                    await vm.refresh()
+            onPullSucceeded: { [weak flashNoteListViewModelRef, weak profileViewModel, weak collectionsViewModel, weak favoritesViewModel, weak profileStatsViewModel] response in
+                if let profile = response.profile {
+                    await profileViewModel?.applySyncSnapshot(profile)
+                }
+                if !response.notes.isEmpty {
+                    await flashNoteListViewModelRef?.applySyncSnapshot(response.notes)
+                }
+                if !response.collections.isEmpty {
+                    await collectionsViewModel?.applySyncSnapshot(collections: response.collections)
+                }
+                if !response.favorites.isEmpty {
+                    await favoritesViewModel?.applySyncSnapshot(response.favorites)
                 }
                 await profileStatsViewModel?.refresh()
             }
@@ -186,15 +205,7 @@ public final class AppDependencies: ObservableObject {
                 syncCoordinator?.refreshPendingCount()
             }
         }
-        self.collectionsViewModel = CollectionsViewModel(
-            collectionRepository: collectionRepository,
-            flashNoteListViewModel: flashNoteListViewModel
-        )
         self.contactsViewModel = ContactsViewModel(repository: contactRepository)
-        self.favoritesViewModel = FavoritesViewModel(
-            repository: favoriteRepository,
-            registry: favoriteRegistry
-        )
         let shareStore = ShareInboxStore()
         self.shareInboxStore = shareStore
         self.shareInboxConsumer = ShareInboxConsumer(store: shareStore)

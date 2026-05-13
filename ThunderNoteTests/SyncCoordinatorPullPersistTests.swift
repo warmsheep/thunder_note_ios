@@ -120,6 +120,43 @@ final class SyncCoordinatorPullPersistTests: XCTestCase {
         XCTAssertEqual(try dao.countByConversation(username: "alice", conversationKey: 7), 0)
         XCTAssertEqual(try dao.countByConversation(username: "bob", conversationKey: 7), 1)
     }
+
+    @MainActor
+    func test_manualSync_forwardsSnapshotToHook_forNonMessageSlices() async throws {
+        let repo = StubSyncRepositoryPull()
+        repo.pullResponse = SyncPullResponse(
+            profile: UserProfile(nickname: "Alice"),
+            notes: [
+                FlashNote(id: -1, title: "收集箱", inbox: true),
+                FlashNote(id: 7, title: "工作")
+            ],
+            collections: [Collection(id: 1, name: "项目")],
+            favorites: [FavoriteItem(id: 9, messageId: 77, favoritedAt: "2026-05-13T10:00:00")],
+            serverTime: "S"
+        )
+        repo.pushResponse = SyncPushResponse(accepted: true)
+
+        let hook = SnapshotHookBox()
+        let coord = SyncCoordinator(
+            syncRepository: repo,
+            messageLocalDao: dao,
+            usernameProvider: { "alice" },
+            currentUserIdProvider: { 1 },
+            onPullSucceeded: { response in
+                hook.profileNickname = response.profile?.nickname
+                hook.noteCount = response.notes.count
+                hook.collectionCount = response.collections.count
+                hook.favoriteCount = response.favorites.count
+            }
+        )
+
+        await coord.manualSync()
+
+        XCTAssertEqual(hook.profileNickname, "Alice")
+        XCTAssertEqual(hook.noteCount, 2)
+        XCTAssertEqual(hook.collectionCount, 1)
+        XCTAssertEqual(hook.favoriteCount, 1)
+    }
 }
 
 /// 文件局部 stub。
@@ -129,4 +166,11 @@ private final class StubSyncRepositoryPull: SyncRepository, @unchecked Sendable 
     func bootstrap() async throws -> SyncPullResponse { pullResponse }
     func pull() async throws -> SyncPullResponse { pullResponse }
     func push(_ payload: SyncPushRequest) async throws -> SyncPushResponse { pushResponse }
+}
+
+private final class SnapshotHookBox: @unchecked Sendable {
+    var profileNickname: String?
+    var noteCount: Int = 0
+    var collectionCount: Int = 0
+    var favoriteCount: Int = 0
 }
