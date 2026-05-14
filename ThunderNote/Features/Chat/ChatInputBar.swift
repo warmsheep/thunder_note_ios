@@ -14,6 +14,7 @@ struct ChatInputBar: View {
     let onPickVideo: () -> Void
     let onPickFile: () -> Void
     let onPickCamera: () -> Void
+    let onPickCard: () -> Void
     let onRecordingDragChanged: (CGSize) -> Void
     let onRecordingStart: () -> Void
     let onRecordingFinish: () -> Void
@@ -70,6 +71,8 @@ struct ChatInputBar: View {
                 .accessibilityIdentifier("chatInputPickVideo")
             Button("文件") { onPickFile() }
                 .accessibilityIdentifier("chatInputPickFile")
+            Button("卡片") { onPickCard() }
+                .accessibilityIdentifier("chatInputPickCard")
             Button("取消", role: .cancel) { }
         }
     }

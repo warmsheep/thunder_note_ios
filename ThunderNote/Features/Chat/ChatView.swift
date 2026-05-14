@@ -23,6 +23,8 @@ struct ChatView: View {
     @State private var mediaPreviewRequest: MediaPreviewRequest?
     @State private var cardDetailMessage: Message? = nil
     @State private var mergeTitle: String = ""
+    @State private var forwardTargets: [FlashNote] = []
+    @State private var forwardSourceItem: ChatMessageItem? = nil
     /// 录音长按手势的拖动偏移；y 大于 -60 时进入「上滑取消」区域。
     @State private var recordingDragOffset: CGSize = .zero
     /// 当前是否处于录音中（手指未抬起）。
@@ -170,6 +172,21 @@ struct ChatView: View {
         } message: {
             Text("将所选 \(viewModel.selectedRemoteIds.count) 条消息合并为一张卡片")
         }
+        .confirmationDialog(
+            "转发到闪记",
+            isPresented: Binding(
+                get: { forwardSourceItem != nil },
+                set: { if !$0 { forwardSourceItem = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            ForEach(forwardTargets, id: \.id) { note in
+                Button(note.title ?? "未命名") { forwardToFlashNote(note) }
+            }
+            Button("取消", role: .cancel) { forwardSourceItem = nil }
+        } message: {
+            Text("选择目标闪记")
+        }
     }
 
     @ViewBuilder
@@ -191,6 +208,7 @@ struct ChatView: View {
                     viewModel.transientMessage = "当前设备不支持相机"
                 }
             },
+            onPickCard: { presentCardEditor = true },
             onRecordingDragChanged: { offset in
                 recordingDragOffset = offset
             },
@@ -404,28 +422,77 @@ struct ChatView: View {
         return target
     }
 
-    /// D2-I3-15 转发：文件类消息先下载再拷贝文件到剪贴板；文本直接拷贝文本。
     private func handleForward(_ item: ChatMessageItem) {
-        if item.message.resolvedMediaType == .text {
-            UIPasteboard.general.string = item.message.content
-            viewModel.transientMessage = "已复制文本，可粘贴到其他会话"
-        } else if item.message.resolvedMediaType.isMediaAttachment {
-            guard let objectName = item.message.mediaUrl, !objectName.isEmpty else {
-                viewModel.transientMessage = "没有可转发的内容"
-                return
-            }
-            let fileName = item.message.fileName ?? "file"
-            Task {
-                do {
-                    let cachedURL = try await dependencies.fileRepository.download(objectName: objectName)
-                    UIPasteboard.general.url = cachedURL
-                    viewModel.transientMessage = "已复制「\(fileName)」，可粘贴到其他会话"
-                } catch {
-                    viewModel.transientMessage = "转发失败：\(error.localizedDescription)"
+        Task {
+            do {
+                let allNotes = try await dependencies.flashNoteRepository.list()
+                let currentFlashNoteId = viewModel.key.flashNoteIdForRequest
+                forwardTargets = allNotes.filter { note in
+                    if let current = currentFlashNoteId, note.id == current { return false }
+                    return true
                 }
+                if forwardTargets.isEmpty {
+                    viewModel.transientMessage = "没有可转发的闪记"
+                    return
+                }
+                forwardSourceItem = item
+            } catch {
+                viewModel.transientMessage = "获取闪记列表失败：\(error.localizedDescription)"
             }
-        } else {
-            viewModel.transientMessage = "没有可转发的内容"
+        }
+    }
+
+    private func forwardToFlashNote(_ target: FlashNote) {
+        guard let item = forwardSourceItem else { return }
+        let targetId = target.id
+        forwardSourceItem = nil
+        let message = item.message
+        let mediaType = message.resolvedMediaType
+
+        Task {
+            do {
+                if mediaType == .text {
+                    guard let text = message.content, !text.isEmpty else {
+                        viewModel.transientMessage = "没有可转发的内容"
+                        return
+                    }
+                    let forwardMsg = Message(
+                        senderId: viewModel.currentUserId,
+                        receiverId: viewModel.currentUserId,
+                        content: text,
+                        flashNoteId: targetId,
+                        clientRequestId: UUID().uuidString,
+                        role: "user",
+                        createdAt: ISO8601DateFormatter().string(from: Date()),
+                        mediaType: MessageMediaType.text.rawValue
+                    )
+                    _ = try await dependencies.messageRepository.send(forwardMsg)
+                    viewModel.transientMessage = "已转发到「\(target.title ?? "未命名")」"
+                } else if mediaType.isMediaAttachment {
+                    let forwardMsg = Message(
+                        senderId: viewModel.currentUserId,
+                        receiverId: viewModel.currentUserId,
+                        content: message.content,
+                        flashNoteId: targetId,
+                        clientRequestId: UUID().uuidString,
+                        role: "user",
+                        createdAt: ISO8601DateFormatter().string(from: Date()),
+                        mediaType: message.mediaType,
+                        mediaUrl: message.mediaUrl,
+                        mediaDuration: message.mediaDuration,
+                        thumbnailUrl: message.thumbnailUrl,
+                        fileName: message.fileName,
+                        fileSize: message.fileSize,
+                        payload: message.payload
+                    )
+                    _ = try await dependencies.messageRepository.send(forwardMsg)
+                    viewModel.transientMessage = "已转发到「\(target.title ?? "未命名")」"
+                } else {
+                    viewModel.transientMessage = "不支持转发此类型消息"
+                }
+            } catch {
+                viewModel.transientMessage = "转发失败：\(error.localizedDescription)"
+            }
         }
     }
 

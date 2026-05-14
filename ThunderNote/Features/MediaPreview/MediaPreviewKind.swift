@@ -52,6 +52,21 @@ public enum MediaPreviewKind: Equatable, Sendable {
         "pl", "r", "lua", "vim", "dockerfile", "makefile"
     ]
 
+    private static let officeExtensions: Set<String> = [
+        "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "rtf", "pages", "numbers", "key"
+    ]
+
+    private static let epubExtensions: Set<String> = ["epub"]
+
+    private static func isOfficeExtension(_ ext: String) -> Bool {
+        officeExtensions.contains(ext)
+    }
+
+    private static func isEpubExtension(_ ext: String) -> Bool {
+        epubExtensions.contains(ext)
+    }
+
     private static func fileExtension(from fileName: String?) -> String? {
         guard let fileName, let dot = fileName.lastIndex(of: ".") else { return nil }
         let afterDot = fileName.index(after: dot)
