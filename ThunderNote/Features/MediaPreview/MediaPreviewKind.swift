@@ -11,9 +11,9 @@ public enum MediaPreviewKind: Equatable, Sendable {
     case image
     case video
     case pdf
+    case textFile
     case other
 
-    /// 根据 Message.mediaType / mediaUrl / fileName 启发式判定。
     public static func resolve(
         mediaType: MessageMediaType,
         fileName: String? = nil,
@@ -23,20 +23,34 @@ public enum MediaPreviewKind: Equatable, Sendable {
         case .image: return .image
         case .video: return .video
         case .file, .audio, .text, .composite:
-            // 优先 content-type 判定，其次扩展名，最后兜底 .other
             if let contentType = contentType?.lowercased() {
                 if contentType.hasPrefix("image/") { return .image }
                 if contentType.hasPrefix("video/") { return .video }
                 if contentType == "application/pdf" { return .pdf }
+                if contentType.hasPrefix("text/") { return .textFile }
             }
             if let ext = Self.fileExtension(from: fileName)?.lowercased() {
                 if ["pdf"].contains(ext) { return .pdf }
-                if ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains(ext) { return .image }
-                if ["mp4", "mov", "m4v", "avi"].contains(ext) { return .video }
+                if ["png", "jpg", "jpeg", "gif", "heic", "webp", "bmp", "tiff", "tif", "svg"].contains(ext) { return .image }
+                if ["mp4", "mov", "m4v", "avi", "webm", "3gp", "mpeg", "mpg", "mkv"].contains(ext) { return .video }
+                if Self.isTextFileExtension(ext) { return .textFile }
             }
             return .other
         }
     }
+
+    private static func isTextFileExtension(_ ext: String) -> Bool {
+        textFileExtensions.contains(ext)
+    }
+
+    private static let textFileExtensions: Set<String> = [
+        "txt", "json", "xml", "csv", "log", "md", "html", "htm",
+        "java", "py", "js", "ts", "css", "yaml", "yml",
+        "sh", "bash", "sql", "rb", "go", "rs",
+        "c", "cpp", "h", "m", "swift", "kt",
+        "toml", "ini", "cfg", "conf", "properties",
+        "pl", "r", "lua", "vim", "dockerfile", "makefile"
+    ]
 
     private static func fileExtension(from fileName: String?) -> String? {
         guard let fileName, let dot = fileName.lastIndex(of: ".") else { return nil }

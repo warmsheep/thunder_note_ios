@@ -91,19 +91,7 @@ public struct CardItem: Codable, Sendable, Equatable, Identifiable {
 
     /// 解析媒体类型为强类型枚举，便于 UI 分发；与 Android `MessageMediaType` 对齐。
     public var resolvedMediaType: MessageMediaType {
-        guard let raw = mediaType else { return .file }
-        if let value = MessageMediaType(rawValue: raw.uppercased()) {
-            return value
-        }
-        // 服务端可能返回小写 image / video / audio / file
-        switch raw.lowercased() {
-        case "image": return .image
-        case "video": return .video
-        case "audio": return .audio
-        case "file":  return .file
-        case "composite": return .composite
-        case "text":  return .text
-        default:      return .file
-        }
+        let resolved = MessageMediaType.resolve(mediaType)
+        return resolved == .text ? .file : resolved
     }
 }

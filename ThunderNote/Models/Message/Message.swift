@@ -60,10 +60,7 @@ public struct Message: Codable, Sendable, Equatable, Identifiable {
     }
 
     public var resolvedMediaType: MessageMediaType {
-        if let raw = mediaType, let value = MessageMediaType(rawValue: raw) {
-            return value
-        }
-        return .text
+        MessageMediaType.resolve(mediaType)
     }
 }
 

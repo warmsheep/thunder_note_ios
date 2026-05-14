@@ -221,6 +221,7 @@ struct ChatView: View {
                 scrollTargetMessageId: viewModel.scrollTargetMessageId,
                 prependAnchorMessageId: viewModel.prependAnchorMessageId,
                 mediaUrlResolver: dependencies.mediaUrlResolver,
+                fileRepository: dependencies.fileRepository,
                 isMultiSelectMode: viewModel.isMultiSelectMode,
                 selectedRemoteIds: viewModel.selectedRemoteIds,
                 isFavorited: { item in
@@ -369,31 +370,62 @@ struct ChatView: View {
         )
     }
 
-    /// D2-I3-15 下载到本地：调用 `FileRepository.download`，成功后 toast 提示文件位置。
+    /// D2-I3-15 下载到本地：缓存后复制到 Documents/闪记/ 并用原始文件名。
     private func downloadMedia(_ item: ChatMessageItem) async {
-        guard let objectName = item.message.mediaUrl, !objectName.isEmpty else { return }
+        guard let objectName = item.message.mediaUrl, !objectName.isEmpty else {
+            viewModel.transientMessage = "没有可下载的文件"
+            return
+        }
         do {
-            let url = try await dependencies.fileRepository.download(objectName: objectName)
-            viewModel.transientMessage = "已缓存到：\(url.lastPathComponent)"
+            let cachedURL = try await dependencies.fileRepository.download(objectName: objectName)
+            let fileName = item.message.fileName ?? objectName.components(separatedBy: "/").last ?? "file"
+            let downloadsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                .appendingPathComponent("闪记", isDirectory: true)
+            try FileManager.default.createDirectory(at: downloadsDir, withIntermediateDirectories: true)
+            let destination = uniqueURL(in: downloadsDir, fileName: fileName)
+            try FileManager.default.copyItem(at: cachedURL, to: destination)
+            viewModel.transientMessage = "已保存到：闪记/\(destination.lastPathComponent)"
         } catch {
-            viewModel.transientMessage = error.localizedDescription
+            viewModel.transientMessage = "下载失败：\(error.localizedDescription)"
         }
     }
 
-    /// D2-I3-15 转发：当前 MVP 仅复制内容到剪贴板，提示用户去目标会话粘贴。
-    /// 未来 D2-I7 接入完整路由后，可弹出「选择会话」sheet 直接 sendText / sendImage。
+    private func uniqueURL(in directory: URL, fileName: String) -> URL {
+        var target = directory.appendingPathComponent(fileName)
+        if !FileManager.default.fileExists(atPath: target.path) { return target }
+        let ext = (fileName as NSString).pathExtension
+        let name = (fileName as NSString).deletingPathExtension
+        var i = 1
+        repeat {
+            let newName = ext.isEmpty ? "\(name)(\(i))" : "\(name)(\(i)).\(ext)"
+            target = directory.appendingPathComponent(newName)
+            i += 1
+        } while FileManager.default.fileExists(atPath: target.path)
+        return target
+    }
+
+    /// D2-I3-15 转发：文件类消息先下载再拷贝文件到剪贴板；文本直接拷贝文本。
     private func handleForward(_ item: ChatMessageItem) {
         if item.message.resolvedMediaType == .text {
             UIPasteboard.general.string = item.message.content
             viewModel.transientMessage = "已复制文本，可粘贴到其他会话"
-        } else {
-            // 媒体：拷贝远端 URL（resolved）到剪贴板
-            if let url = dependencies.mediaUrlResolver.resolve(item.message.mediaUrl) {
-                UIPasteboard.general.string = url.absoluteString
-                viewModel.transientMessage = "已复制媒体链接"
-            } else {
+        } else if item.message.resolvedMediaType.isMediaAttachment {
+            guard let objectName = item.message.mediaUrl, !objectName.isEmpty else {
                 viewModel.transientMessage = "没有可转发的内容"
+                return
             }
+            let fileName = item.message.fileName ?? "file"
+            Task {
+                do {
+                    let cachedURL = try await dependencies.fileRepository.download(objectName: objectName)
+                    UIPasteboard.general.url = cachedURL
+                    viewModel.transientMessage = "已复制「\(fileName)」，可粘贴到其他会话"
+                } catch {
+                    viewModel.transientMessage = "转发失败：\(error.localizedDescription)"
+                }
+            }
+        } else {
+            viewModel.transientMessage = "没有可转发的内容"
         }
     }
 

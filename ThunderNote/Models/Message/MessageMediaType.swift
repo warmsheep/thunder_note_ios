@@ -16,4 +16,22 @@ public enum MessageMediaType: String, Codable, Sendable {
         default: return false
         }
     }
+
+    /// 大小写不敏感解析，兼容后端返回 "image"/"IMAGE"/"file"/"FILE" 等变体。
+    /// 同时处理后端用 "voice" 而 iOS 枚举为 `.audio` 的映射。
+    public static func resolve(_ raw: String?) -> MessageMediaType {
+        guard let raw else { return .text }
+        let upper = raw.uppercased()
+        switch upper {
+        case "TEXT":      return .text
+        case "IMAGE":     return .image
+        case "VIDEO":     return .video
+        case "AUDIO":     return .audio
+        case "VOICE":     return .audio
+        case "FILE":      return .file
+        case "COMPOSITE": return .composite
+        case "CARD":      return .composite
+        default:          return .text
+        }
+    }
 }

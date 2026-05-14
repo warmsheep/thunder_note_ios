@@ -180,6 +180,14 @@ public final class FileRepositoryImpl: NSObject, FileRepository, @unchecked Send
         if FileManager.default.fileExists(atPath: cached.path) {
             return cached
         }
+        // 旧缓存兼容：无后缀路径存在时迁移到新带后缀路径
+        let legacy = legacyCacheURL(for: objectName)
+        if FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.moveItem(at: legacy, to: cached)
+            if FileManager.default.fileExists(atPath: cached.path) {
+                return cached
+            }
+        }
         guard let url = mediaUrlResolver.resolve(objectName) else {
             throw FileRepositoryError.unsupportedScheme
         }
@@ -217,6 +225,23 @@ public final class FileRepositoryImpl: NSObject, FileRepository, @unchecked Send
     }
 
     private func cacheURL(for objectName: String) -> URL {
+        let hash = Self.simpleHash(objectName)
+        let prefix = String(hash.prefix(2))
+        let rest = String(hash.dropFirst(2))
+        let ext = Self.fileExtensionFromObjectName(objectName)
+        let fileName = ext.isEmpty ? rest : "\(rest).\(ext)"
+        return cacheRoot
+            .appendingPathComponent(prefix, isDirectory: true)
+            .appendingPathComponent(fileName)
+    }
+
+    private static func fileExtensionFromObjectName(_ objectName: String) -> String {
+        let name = objectName.components(separatedBy: "/").last ?? objectName
+        guard let dot = name.lastIndex(of: "."), name.index(after: dot) < name.endIndex else { return "" }
+        return String(name[name.index(after: dot)...]).lowercased()
+    }
+
+    private func legacyCacheURL(for objectName: String) -> URL {
         let hash = Self.simpleHash(objectName)
         let prefix = String(hash.prefix(2))
         let rest = String(hash.dropFirst(2))

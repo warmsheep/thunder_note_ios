@@ -12,6 +12,7 @@ struct MessageBubble: View {
     let isMultiSelectMode: Bool
     let isSelected: Bool
     let mediaUrlResolver: MediaUrlResolver?
+    let fileRepository: FileRepository?
     let onCopy: () -> Void
     let onDelete: () -> Void
     let onRetry: () -> Void
@@ -193,25 +194,10 @@ struct MessageBubble: View {
 
     private var imageThumbnail: some View {
         Button(action: onTapMediaAttachment) {
-            Group {
-                if let url = thumbnailURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            ProgressView().tint(.white)
-                                .frame(width: 180, height: 180)
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .failure:
-                            placeholderImage
-                        @unknown default:
-                            placeholderImage
-                        }
-                    }
-                } else {
-                    placeholderImage
-                }
-            }
+            CachedThumbnailView(
+                objectName: item.message.thumbnailUrl ?? item.message.mediaUrl,
+                fileRepository: fileRepository
+            )
             .frame(width: 200, height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
@@ -221,20 +207,10 @@ struct MessageBubble: View {
     private var videoThumbnail: some View {
         Button(action: onTapMediaAttachment) {
             ZStack {
-                if let url = thumbnailURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            ProgressView().tint(.white)
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        default:
-                            placeholderVideo
-                        }
-                    }
-                } else {
-                    placeholderVideo
-                }
+                CachedThumbnailView(
+                    objectName: item.message.thumbnailUrl,
+                    fileRepository: fileRepository
+                )
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 40))
                     .foregroundStyle(.white.opacity(0.92))
@@ -265,7 +241,7 @@ struct MessageBubble: View {
     private var fileChip: some View {
         Button(action: onTapMediaAttachment) {
             HStack(spacing: 10) {
-                Image(systemName: "doc.fill")
+                Image(systemName: fileIconName)
                     .font(.system(size: 22))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.message.fileName ?? "未命名文件")
@@ -402,6 +378,19 @@ struct MessageBubble: View {
         case .file: return "[文件]"
         case .composite: return "[卡片]"
         default: return ""
+        }
+    }
+
+    private var fileIconName: String {
+        let ext = (item.message.fileName ?? "")
+            .components(separatedBy: ".").last?.lowercased() ?? ""
+        switch ext {
+        case "pdf": return "doc.richtext"
+        case "doc", "docx": return "doc.text"
+        case "xls", "xlsx": return "chart.bar.doc.horizontal"
+        case "ppt", "pptx": return "doc.text.image"
+        case "zip", "rar", "7z", "tar", "gz": return "doc.zipper"
+        default: return "doc.fill"
         }
     }
 }

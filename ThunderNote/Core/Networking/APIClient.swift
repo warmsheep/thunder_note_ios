@@ -61,19 +61,26 @@ public final class APIClient: @unchecked Sendable {
         allowRetry: Bool
     ) async throws -> T {
         let request = try await buildRequest(for: endpoint)
+        // ⚠️ TEMP DIAGNOSTIC: trace request/response for login bug
+        let _diagURL = request.url?.absoluteString ?? "?"
+        let _diagAuth = request.value(forHTTPHeaderField: "Authorization") ?? "nil"
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError {
+            NSLog("[TN-DIAG] REQUEST FAILED url=\(_diagURL) auth=\(_diagAuth) URLError=\(error.localizedDescription)")
             throw APIError.transport(message: error.localizedDescription)
         } catch {
+            NSLog("[TN-DIAG] REQUEST FAILED url=\(_diagURL) auth=\(_diagAuth) error=\(error.localizedDescription)")
             throw APIError.transport(message: error.localizedDescription)
         }
 
         guard let http = response as? HTTPURLResponse else {
             throw APIError.transport(message: "无效的响应类型")
         }
+        let _diagBody = String(data: data.prefix(500), encoding: .utf8) ?? "(non-utf8)"
+        NSLog("[TN-DIAG] RESPONSE url=\(_diagURL) status=\(http.statusCode) auth=\(_diagAuth) body=\(_diagBody)")
 
         // 优先尝试解码 ApiResponse 包装；失败则按 HTTP 状态码兜底。
         if let api = try? decoder.decode(ApiResponse<T>.self, from: data) {

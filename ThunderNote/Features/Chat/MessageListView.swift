@@ -12,6 +12,7 @@ struct MessageListView: View {
     let scrollTargetMessageId: Int64?
     let prependAnchorMessageId: Int64?
     let mediaUrlResolver: MediaUrlResolver?
+    let fileRepository: FileRepository?
     /// D2-I3-16 多选模式：是否处于多选；当前选区。
     let isMultiSelectMode: Bool
     let selectedRemoteIds: Set<Int64>
@@ -60,6 +61,7 @@ struct MessageListView: View {
                             isMultiSelectMode: isMultiSelectMode,
                             isSelected: isSelected(item),
                             mediaUrlResolver: mediaUrlResolver,
+                            fileRepository: fileRepository,
                             onCopy: { onCopy(item) },
                             onDelete: { onDelete(item) },
                             onRetry: { onRetry(item) },

@@ -11,12 +11,40 @@ struct MediaShareSheet: UIViewControllerRepresentable {
     let fileName: String?
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        // 让系统活动面板里自动识别到「保存到文件」「保存到相册」等。
+        let item: Any
+        if let fileName, !fileName.isEmpty {
+            item = ShareFileItem(url: url, fileName: fileName)
+        } else {
+            item = url
+        }
+        let controller = UIActivityViewController(activityItems: [item], applicationActivities: nil)
         return controller
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+/// 包装本地文件 URL + 原始文件名，确保 UIActivityViewController 保存时保留后缀。
+final class ShareFileItem: NSObject, UIActivityItemSource {
+    let url: URL
+    let fileName: String
+
+    init(url: URL, fileName: String) {
+        self.url = url
+        self.fileName = fileName
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        url
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        url
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
+        fileName
+    }
 }
 
 /// 把当前资源（URL）另存到相册 / 文件的命令式 helper。
