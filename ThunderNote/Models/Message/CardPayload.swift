@@ -90,8 +90,15 @@ public struct CardItem: Codable, Sendable, Equatable, Identifiable {
     }
 
     /// 解析媒体类型为强类型枚举，便于 UI 分发；与 Android `MessageMediaType` 对齐。
+    /// 卡片 item 主要承载媒体，所以"无 mediaType""未知 mediaType"都按 `.file` 兜底；
+    /// 但显式声明的 "TEXT" 必须保留为 `.text`。
     public var resolvedMediaType: MessageMediaType {
+        guard let mediaType, !mediaType.isEmpty else { return .file }
         let resolved = MessageMediaType.resolve(mediaType)
-        return resolved == .text ? .file : resolved
+        // `MessageMediaType.resolve` 对未知值会落到 `.text`；卡片场景下未知值更应当走文件兜底。
+        if resolved == .text && mediaType.uppercased() != "TEXT" {
+            return .file
+        }
+        return resolved
     }
 }

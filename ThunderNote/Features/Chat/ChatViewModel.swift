@@ -460,7 +460,7 @@ public final class ChatViewModel: ObservableObject {
                 // 此时 syncCoordinator 会发通知，UI 会自动 reloadAndMergeLocal，
                 // 看到 DB 里的 queued 状态
             } else {
-                updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+                updatePendingFailure(clientRequestId: clientRequestId, reason: failureReason(error))
             }
         }
     }
@@ -598,7 +598,7 @@ public final class ChatViewModel: ObservableObject {
                     )
                     _ = await syncCoordinator.enqueue(pending)
                 } else {
-                    updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+                    updatePendingFailure(clientRequestId: clientRequestId, reason: failureReason(error))
                 }
             }
         } catch let api as APIError {
@@ -650,7 +650,7 @@ public final class ChatViewModel: ObservableObject {
                 )
                 _ = await syncCoordinator.enqueue(pending)
             } else {
-                updatePendingFailure(clientRequestId: clientRequestId, reason: error.localizedDescription)
+                updatePendingFailure(clientRequestId: clientRequestId, reason: failureReason(error))
             }
         }
     }
@@ -843,6 +843,16 @@ public final class ChatViewModel: ObservableObject {
     private func updatePendingFailure(clientRequestId: String, reason: String) {
         guard let idx = items.firstIndex(where: { $0.clientRequestId == clientRequestId }) else { return }
         items[idx].status = .failed(reason: reason)
+    }
+
+    /// 从异常提取面向用户的失败原因。`APIError` 优先走 `displayMessage`（拿后端返回的
+    /// 中文 message），避免出现 "未能完成操作。（ThunderNote.APIError 错误0。）" 这种 Apple
+    /// 本地化的占位文案；其他错误退回 `localizedDescription`。
+    private func failureReason(_ error: Error) -> String {
+        if let api = error as? APIError {
+            return api.displayMessage
+        }
+        return error.localizedDescription
     }
 
     private static func makeItem(from message: Message) -> ChatMessageItem {
