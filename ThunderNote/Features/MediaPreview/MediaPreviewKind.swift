@@ -6,11 +6,13 @@ import UniformTypeIdentifiers
 /// - `.image`：走自实现 lightbox（双指缩放 + 拖动关闭）
 /// - `.video`：`AVPlayerViewController`
 /// - `.pdf`：`PDFKit.PDFView`
-/// - `.other`：`QLPreviewController` 兜底（含 epub 等所有 QLPreviewController 原生支持的格式）
+/// - `.epub`：解包后用 `WKWebView` 阅读正文
+/// - `.other`：`QLPreviewController` 兜底
 public enum MediaPreviewKind: Equatable, Sendable {
     case image
     case video
     case pdf
+    case epub
     case textFile
     case other
 
@@ -27,10 +29,12 @@ public enum MediaPreviewKind: Equatable, Sendable {
                 if contentType.hasPrefix("image/") { return .image }
                 if contentType.hasPrefix("video/") { return .video }
                 if contentType == "application/pdf" { return .pdf }
+                if contentType == "application/epub+zip" { return .epub }
                 if contentType.hasPrefix("text/") { return .textFile }
             }
             if let ext = Self.fileExtension(from: fileName)?.lowercased() {
                 if ["pdf"].contains(ext) { return .pdf }
+                if ["epub"].contains(ext) { return .epub }
                 if ["png", "jpg", "jpeg", "gif", "heic", "webp", "bmp", "tiff", "tif", "svg"].contains(ext) { return .image }
                 if ["mp4", "mov", "m4v", "avi", "webm", "3gp", "mpeg", "mpg", "mkv"].contains(ext) { return .video }
                 if Self.isTextFileExtension(ext) { return .textFile }

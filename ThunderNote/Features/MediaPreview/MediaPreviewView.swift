@@ -80,6 +80,8 @@ struct MediaPreviewView: View {
                 .ignoresSafeArea(edges: .bottom)
         case .pdf:
             PDFPreviewView(url: url)
+        case .epub:
+            EpubPreviewView(url: url, fileName: viewModel.request.fileName)
         case .textFile:
             TextFilePreviewView(url: url, fileName: viewModel.request.fileName)
         case .other:
