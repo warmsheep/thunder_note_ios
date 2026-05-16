@@ -146,12 +146,11 @@ struct ChatView: View {
         }
         .sheet(item: $cardDetailMessage) { msg in
             CardDetailView(
-                message: msg,
-                mediaUrlResolver: dependencies.mediaUrlResolver
+                message: msg
             )
         }
         .alert(
-            "操作失败",
+            "提示",
             isPresented: Binding(
                 get: { viewModel.transientMessage != nil },
                 set: { if !$0 { viewModel.clearTransientMessage() } }
@@ -388,7 +387,6 @@ struct ChatView: View {
         )
     }
 
-    /// D2-I3-15 下载到本地：缓存后复制到 Documents/闪记/ 并用原始文件名。
     private func downloadMedia(_ item: ChatMessageItem) async {
         guard let objectName = item.message.mediaUrl, !objectName.isEmpty else {
             viewModel.transientMessage = "没有可下载的文件"
@@ -397,14 +395,25 @@ struct ChatView: View {
         do {
             let cachedURL = try await dependencies.fileRepository.download(objectName: objectName)
             let fileName = item.message.fileName ?? objectName.components(separatedBy: "/").last ?? "file"
+            let subDir = downloadSubDirectory(for: item.message.resolvedMediaType)
             let downloadsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
                 .appendingPathComponent("闪记", isDirectory: true)
+                .appendingPathComponent(subDir, isDirectory: true)
             try FileManager.default.createDirectory(at: downloadsDir, withIntermediateDirectories: true)
             let destination = uniqueURL(in: downloadsDir, fileName: fileName)
             try FileManager.default.copyItem(at: cachedURL, to: destination)
-            viewModel.transientMessage = "已保存到：闪记/\(destination.lastPathComponent)"
+            viewModel.transientMessage = "已保存到：闪记/\(subDir)/\(destination.lastPathComponent)"
         } catch {
             viewModel.transientMessage = "下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func downloadSubDirectory(for mediaType: MessageMediaType) -> String {
+        switch mediaType {
+        case .image: return "图片"
+        case .video: return "视频"
+        case .audio: return "语音"
+        default: return "文件"
         }
     }
 

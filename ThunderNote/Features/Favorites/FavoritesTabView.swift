@@ -101,7 +101,10 @@ struct FavoritesTabView: View {
             Button {
                 handleTap(item)
             } label: {
-                FavoriteRowView(item: item)
+                FavoriteRowView(
+                    item: item,
+                    fileRepository: dependencies.fileRepository
+                )
             }
             .buttonStyle(.plain)
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {

@@ -8,12 +8,12 @@ import SwiftUI
 /// - 点击 item 打开 `MediaPreviewView` 全屏预览
 struct CardDetailView: View {
     let message: Message
-    let mediaUrlResolver: MediaUrlResolver?
 
     @EnvironmentObject private var dependencies: AppDependencies
     @Environment(\.dismiss) private var dismiss
     @State private var previewRequest: MediaPreviewRequest?
 
+    private var fileRepository: FileRepository { dependencies.fileRepository }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -179,19 +179,12 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private func thumbnailView(_ item: CardItem) -> some View {
-        if let url = thumbnailURL(for: item) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    placeholder
-                case .success(let img):
-                    img.resizable().scaledToFill()
-                case .failure:
-                    placeholder
-                @unknown default:
-                    placeholder
-                }
-            }
+        let objectName = item.thumbnailUrl ?? (item.resolvedMediaType == .image ? item.mediaUrl : nil)
+        if let objectName, !objectName.isEmpty {
+            CachedThumbnailView(
+                objectName: objectName,
+                fileRepository: dependencies.fileRepository
+            )
         } else {
             placeholder
         }
@@ -204,17 +197,6 @@ struct CardDetailView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(.white.opacity(0.85))
         }
-    }
-
-    private func thumbnailURL(for item: CardItem) -> URL? {
-        guard let resolver = mediaUrlResolver else { return nil }
-        if let thumb = item.thumbnailUrl, !thumb.isEmpty {
-            return resolver.resolve(thumb)
-        }
-        if item.resolvedMediaType == .image {
-            return resolver.resolve(item.mediaUrl)
-        }
-        return nil
     }
 
     private func openPreview(_ item: CardItem, kind: MediaPreviewKind) {

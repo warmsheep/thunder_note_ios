@@ -102,33 +102,100 @@ struct MessageBubble: View {
         }
     }
 
-    /// D2-I3-18 卡片消息渲染：展示标题 + 缩略项目数 + 点击进入详情页。
     private var compositeCard: some View {
         Button(action: onOpenCardDetail) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "rectangle.stack.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(isOutgoing ? Color.white : DesignTokens.Color.brandPrimary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.message.payload?.title ?? item.message.content ?? "卡片消息")
-                        .font(DesignTokens.Typography.body)
-                        .lineLimit(2)
-                    if let summary = item.message.payload?.summary, !summary.isEmpty {
-                        Text(summary)
-                            .font(DesignTokens.Typography.caption)
-                            .lineLimit(1)
-                            .opacity(0.85)
-                    } else if let count = item.message.payload?.items?.count {
-                        Text("共 \(count) 项")
-                            .font(DesignTokens.Typography.caption)
-                            .opacity(0.85)
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(item.message.payload?.title ?? item.message.content ?? "卡片消息")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isOutgoing ? .white : DesignTokens.Color.textPrimary)
+                    .lineLimit(2)
+                if let summary = buildSummary, !summary.isEmpty {
+                    Text(summary)
+                        .font(DesignTokens.Typography.caption)
+                        .foregroundStyle(isOutgoing ? .white.opacity(0.8) : DesignTokens.Color.textSecondary)
+                        .lineLimit(3)
                 }
+                if !mediaItems.isEmpty {
+                    compositeGrid
+                }
+                if !fileItems.isEmpty {
+                    compositeFileList
+                }
+                Divider()
+                    .background(isOutgoing ? .white.opacity(0.3) : DesignTokens.Color.divider)
+                Text("闪记卡片消息")
+                    .font(.system(size: 11))
+                    .foregroundStyle(isOutgoing ? .white.opacity(0.6) : DesignTokens.Color.textSecondary)
             }
             .frame(maxWidth: 260, alignment: .leading)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("messageCompositeCard")
+    }
+
+    private var compositeGrid: some View {
+        let urls = mediaItems
+        let count = min(urls.count, 9)
+        let cols = count == 1 ? 1 : (count == 2 || count == 4 ? 2 : 3)
+        let thumbSize: CGFloat = count == 1 ? 200 : 80
+
+        return LazyVGrid(columns: Array(repeating: GridItem(.fixed(thumbSize), spacing: 2), count: cols), spacing: 2) {
+            ForEach(0..<count, id: \.self) { index in
+                CachedThumbnailView(
+                    objectName: urls[index],
+                    fileRepository: fileRepository
+                )
+                .frame(width: thumbSize, height: thumbSize)
+                .clipped()
+                .background(Color.gray.opacity(0.15))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var compositeFileList: some View {
+        ForEach(fileItems, id: \.fileName) { fi in
+            HStack(spacing: 6) {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(isOutgoing ? .white.opacity(0.7) : DesignTokens.Color.textSecondary)
+                Text(fi.fileName ?? "文件")
+                    .font(.system(size: 12))
+                    .foregroundStyle(isOutgoing ? .white.opacity(0.9) : DesignTokens.Color.textPrimary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var mediaItems: [String] {
+        guard let items = item.message.payload?.items else { return [] }
+        return items.compactMap { cardItem -> String? in
+            let mt = cardItem.resolvedMediaType
+            if mt == .image { return cardItem.mediaUrl }
+            if mt == .video { return cardItem.thumbnailUrl ?? cardItem.mediaUrl }
+            return nil
+        }
+    }
+
+    private var fileItems: [CardItem] {
+        guard let items = item.message.payload?.items else { return [] }
+        return items.filter { $0.resolvedMediaType == .file }
+    }
+
+    private var buildSummary: String? {
+        if let summary = item.message.payload?.summary, !summary.isEmpty { return summary }
+        guard let items = item.message.payload?.items, !items.isEmpty else { return nil }
+        let previews = items.prefix(3).map { ci -> String in
+            switch ci.resolvedMediaType {
+            case .image: return "[图片]"
+            case .video: return "[视频]"
+            case .audio: return "[语音]"
+            case .file: return ci.fileName ?? "[文件]"
+            default: return ci.content ?? ""
+            }
+        }
+        let joined = previews.joined(separator: "、")
+        return items.count > 3 ? "\(joined)等\(items.count)项" : joined
     }
 
     /// 长按菜单内容；按 mediaType 条件化展示「下载 / 外部打开」等。

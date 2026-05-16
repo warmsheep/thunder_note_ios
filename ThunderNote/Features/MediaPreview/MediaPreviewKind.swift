@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// - `.image`：走自实现 lightbox（双指缩放 + 拖动关闭）
 /// - `.video`：`AVPlayerViewController`
 /// - `.pdf`：`PDFKit.PDFView`
-/// - `.other`：`QLPreviewController` 兜底
+/// - `.other`：`QLPreviewController` 兜底（含 epub 等所有 QLPreviewController 原生支持的格式）
 public enum MediaPreviewKind: Equatable, Sendable {
     case image
     case video
@@ -57,14 +57,8 @@ public enum MediaPreviewKind: Equatable, Sendable {
         "rtf", "pages", "numbers", "key"
     ]
 
-    private static let epubExtensions: Set<String> = ["epub"]
-
     private static func isOfficeExtension(_ ext: String) -> Bool {
         officeExtensions.contains(ext)
-    }
-
-    private static func isEpubExtension(_ ext: String) -> Bool {
-        epubExtensions.contains(ext)
     }
 
     private static func fileExtension(from fileName: String?) -> String? {
