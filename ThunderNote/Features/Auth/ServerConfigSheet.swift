@@ -6,6 +6,7 @@ public final class ServerConfigStoreObservable: ObservableObject {
     @Published public private(set) var displayLabel: String
     @Published public private(set) var isOfficial: Bool
     @Published public private(set) var currentBaseURL: URL
+    @Published public private(set) var selfHostedHistory: [URL]
 
     public let store: ServerConfigStore
     public let onSwitched: (@Sendable () async -> Void)?
@@ -16,6 +17,7 @@ public final class ServerConfigStoreObservable: ObservableObject {
         self.displayLabel = store.displayLabel
         self.isOfficial = store.isOfficial
         self.currentBaseURL = store.currentBaseURL
+        self.selfHostedHistory = store.selfHostedHistory
     }
 
     public func useOfficial() {
@@ -30,10 +32,21 @@ public final class ServerConfigStoreObservable: ObservableObject {
         triggerSwitched()
     }
 
+    public func deleteSelfHostedHistory(url: URL) {
+        let previousBaseURL = store.currentBaseURL
+        let previousIsOfficial = store.isOfficial
+        store.deleteSelfHostedHistory(url: url)
+        refresh()
+        if previousBaseURL != store.currentBaseURL || previousIsOfficial != store.isOfficial {
+            triggerSwitched()
+        }
+    }
+
     public func refresh() {
         displayLabel = store.displayLabel
         isOfficial = store.isOfficial
         currentBaseURL = store.currentBaseURL
+        selfHostedHistory = store.selfHostedHistory
     }
 
     private func triggerSwitched() {
@@ -98,6 +111,43 @@ struct ServerConfigSheet: View {
                     Text("自托管服务器")
                 } footer: {
                     Text("切换会清除当前登录态，需重新登录。HTTPS 必须；HTTP 站点暂不支持运行时启用，需自行打包定制版本。")
+                }
+
+                if !serverConfigStore.selfHostedHistory.isEmpty {
+                    Section("历史自托管服务器") {
+                        ForEach(serverConfigStore.selfHostedHistory, id: \.absoluteString) { url in
+                            HStack(spacing: DesignTokens.Spacing.small) {
+                                Button {
+                                    do {
+                                        try serverConfigStore.useSelfHosted(rawURL: url.absoluteString)
+                                        error = nil
+                                        dismiss()
+                                    } catch let configError as ServerConfigStore.ConfigError {
+                                        error = Self.message(for: configError)
+                                    } catch {
+                                        self.error = error.localizedDescription
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(url.host ?? url.absoluteString)
+                                            .foregroundStyle(DesignTokens.Color.textPrimary)
+                                        Text(url.absoluteString)
+                                            .font(DesignTokens.Typography.caption)
+                                            .foregroundStyle(DesignTokens.Color.textSecondary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .accessibilityIdentifier("serverConfigHistorySelectButton")
+
+                                Button(role: .destructive) {
+                                    serverConfigStore.deleteSelfHostedHistory(url: url)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .accessibilityIdentifier("serverConfigHistoryDeleteButton")
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("切换服务器")

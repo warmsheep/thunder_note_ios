@@ -28,6 +28,7 @@ public final class ServerConfigStore: ServerConfigStoreProviding, @unchecked Sen
 
     public static let modeKey = "tn.server.mode"
     public static let urlKey = "tn.server.self_hosted_url"
+    public static let historyKey = "tn.server.self_hosted_history"
 
     private let userDefaults: UserDefaults
     private let lock = NSLock()
@@ -68,6 +69,12 @@ public final class ServerConfigStore: ServerConfigStoreProviding, @unchecked Sen
         }
     }
 
+    public var selfHostedHistory: [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadHistoryLocked()
+    }
+
     public func useOfficial() {
         lock.lock()
         defer { lock.unlock() }
@@ -83,6 +90,23 @@ public final class ServerConfigStore: ServerConfigStoreProviding, @unchecked Sen
         defer { lock.unlock() }
         userDefaults.set(Mode.selfHosted.rawValue, forKey: Self.modeKey)
         userDefaults.set(normalized.absoluteString, forKey: Self.urlKey)
+        saveHistoryLocked(prepending: normalized)
+    }
+
+    public func deleteSelfHostedHistory(url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        let normalizedString = normalizedHistoryString(url)
+        let filtered = loadHistoryLocked()
+            .filter { normalizedHistoryString($0) != normalizedString }
+            .map(\.absoluteString)
+        userDefaults.set(filtered, forKey: Self.historyKey)
+        if currentModeLocked() == .selfHosted,
+           let current = userDefaults.string(forKey: Self.urlKey),
+           current == normalizedString {
+            userDefaults.set(Mode.official.rawValue, forKey: Self.modeKey)
+            userDefaults.removeObject(forKey: Self.urlKey)
+        }
     }
 
     /// 与 Android `ServerConfigStore.normalizeBaseUrl` 保持等价。
@@ -118,5 +142,35 @@ public final class ServerConfigStore: ServerConfigStoreProviding, @unchecked Sen
         let normalized = "\(scheme)://\(authority)/"
         guard let url = URL(string: normalized) else { throw ConfigError.malformed }
         return url
+    }
+
+    private func currentModeLocked() -> Mode {
+        if let raw = userDefaults.string(forKey: Self.modeKey), let mode = Mode(rawValue: raw) {
+            return mode
+        }
+        return .official
+    }
+
+    private func loadHistoryLocked() -> [URL] {
+        let raw = userDefaults.stringArray(forKey: Self.historyKey) ?? []
+        var seen = Set<String>()
+        return raw.compactMap { value in
+            guard let url = URL(string: value) else { return nil }
+            let normalized = normalizedHistoryString(url)
+            guard seen.insert(normalized).inserted else { return nil }
+            return url
+        }
+    }
+
+    private func saveHistoryLocked(prepending url: URL) {
+        let normalized = normalizedHistoryString(url)
+        let existing = loadHistoryLocked()
+            .map(\.absoluteString)
+            .filter { $0 != normalized }
+        userDefaults.set([normalized] + existing, forKey: Self.historyKey)
+    }
+
+    private func normalizedHistoryString(_ url: URL) -> String {
+        url.absoluteString
     }
 }
