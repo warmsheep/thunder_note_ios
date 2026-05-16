@@ -30,14 +30,37 @@ public final class KeychainTokenStore: TokenStoring, @unchecked Sendable {
     private let accessGroup: String?
     private let lock = NSLock()
 
-    public init(service: String = "com.flashnote.ios.auth", accessGroup: String? = nil) {
+    /// 模拟器 / 未签名构建下 Keychain 会返回 `-34018 errSecMissingEntitlement`，
+    /// 整个 token 存取链路彻底失效（写入静默失败 → 读取 nil → 401 → 强制登出）。
+    /// 检测到该错误后整体切到 `UserDefaults` 兜底；真机带签名走正常 Keychain 路径，
+    /// 不会激活兜底，因此不会降低生产安全等级。
+    private var useFallback: Bool = false
+    private let fallbackDefaults: UserDefaults
+    private static let fallbackPrefix = "tn.auth.fallback."
+
+    public init(
+        service: String = "com.flashnote.ios.auth",
+        accessGroup: String? = nil,
+        fallbackDefaults: UserDefaults = .standard
+    ) {
         self.service = service
         self.accessGroup = accessGroup
+        self.fallbackDefaults = fallbackDefaults
+        // 进程启动时如果上一次已经走过兜底（UserDefaults 里有任意 token），则继续走兜底；
+        // 避免一次会话内 Keychain 正常 / 兜底交替导致读到旧值。
+        if fallbackDefaults.string(forKey: Self.fallbackPrefix + Key.accessToken.rawValue) != nil {
+            self.useFallback = true
+            NSLog("[TN-DIAG] TokenStore: detected prior fallback usage, staying on UserDefaults")
+        }
     }
 
     // MARK: - Read
 
-    public func loadAccessToken() -> String? { readString(.accessToken) }
+    public func loadAccessToken() -> String? {
+        let t = readString(.accessToken)
+        NSLog("[TN-DIAG] loadAccessToken -> \(t == nil ? "nil" : "len=\(t!.count)") fallback=\(useFallback)")
+        return t
+    }
     public func loadRefreshToken() -> String? { readString(.refreshToken) }
     public func loadUsername() -> String? { readString(.username) }
 
@@ -75,23 +98,37 @@ public final class KeychainTokenStore: TokenStoring, @unchecked Sendable {
         defer { lock.unlock() }
         for key in Key.allCases {
             delete(key)
+            fallbackDefaults.removeObject(forKey: Self.fallbackPrefix + key.rawValue)
         }
     }
 
     // MARK: - Keychain primitives
 
     private func readString(_ key: Key) -> String? {
+        if useFallback {
+            return fallbackDefaults.string(forKey: Self.fallbackPrefix + key.rawValue)
+        }
         var query = baseQuery(for: key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecMissingEntitlement {
+            // 模拟器 / 未签名构建：切换到 UserDefaults 兜底。
+            NSLog("[TN-DIAG] Keychain SecItemCopyMatching missing-entitlement, switching to UserDefaults fallback")
+            useFallback = true
+            return fallbackDefaults.string(forKey: Self.fallbackPrefix + key.rawValue)
+        }
         guard status == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     private func writeString(_ key: Key, value: String) {
+        if useFallback {
+            fallbackDefaults.set(value, forKey: Self.fallbackPrefix + key.rawValue)
+            return
+        }
         let data = Data(value.utf8)
         let query = baseQuery(for: key)
         let attributes: [String: Any] = [
@@ -103,11 +140,28 @@ public final class KeychainTokenStore: TokenStoring, @unchecked Sendable {
             var addQuery = query
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            SecItemAdd(addQuery as CFDictionary, nil)
+            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            if addStatus == errSecMissingEntitlement {
+                NSLog("[TN-DIAG] Keychain SecItemAdd missing-entitlement, switching to UserDefaults fallback")
+                useFallback = true
+                fallbackDefaults.set(value, forKey: Self.fallbackPrefix + key.rawValue)
+            } else if addStatus != errSecSuccess {
+                NSLog("[TN-DIAG] Keychain SecItemAdd FAILED key=\(key.rawValue) status=\(addStatus)")
+            }
+        } else if status == errSecMissingEntitlement {
+            NSLog("[TN-DIAG] Keychain SecItemUpdate missing-entitlement, switching to UserDefaults fallback")
+            useFallback = true
+            fallbackDefaults.set(value, forKey: Self.fallbackPrefix + key.rawValue)
+        } else if status != errSecSuccess {
+            NSLog("[TN-DIAG] Keychain SecItemUpdate FAILED key=\(key.rawValue) status=\(status)")
         }
     }
 
     private func delete(_ key: Key) {
+        if useFallback {
+            fallbackDefaults.removeObject(forKey: Self.fallbackPrefix + key.rawValue)
+            return
+        }
         let query = baseQuery(for: key)
         SecItemDelete(query as CFDictionary)
     }

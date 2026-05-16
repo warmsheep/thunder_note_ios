@@ -19,7 +19,10 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""
+    # 个人 Apple ID 团队 ID。Team ID 公开可见，不属于敏感信息；填在这里是为了让
+    # xcodegen 重新生成项目后 Keychain entitlements 仍能正确签到模拟器/真机上，
+    # 否则未签名构建会触发 `errSecMissingEntitlement (-34018)`，导致 Keychain 静默失败。
+    DEVELOPMENT_TEAM: "QH4AVVA4FM"
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
     GCC_TREAT_WARNINGS_AS_ERRORS: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
