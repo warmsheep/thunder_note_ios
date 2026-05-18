@@ -6,12 +6,10 @@ struct SplashView: View {
         ZStack {
             DesignTokens.Color.background.ignoresSafeArea()
             VStack(spacing: DesignTokens.Spacing.medium) {
-                Image(systemName: "bolt.circle.fill")
-                    .font(.system(size: 72))
-                    .foregroundStyle(DesignTokens.Color.brandPrimary)
-                Text("闪记")
-                    .font(DesignTokens.Typography.titleLarge)
-                    .foregroundStyle(DesignTokens.Color.textPrimary)
+                Image("ic_page_logo_login")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 160, height: 160)
                 ProgressView()
                     .progressViewStyle(.circular)
                     .tint(DesignTokens.Color.brandPrimary)
